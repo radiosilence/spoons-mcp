@@ -14,6 +14,20 @@ pub fn id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
     }
 }
 
+/// An ID that isn't always a number, as a string either way.
+pub fn key<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Key {
+        Number(u64),
+        Text(String),
+    }
+    Ok(match Key::deserialize(deserializer)? {
+        Key::Number(id) => id.to_string(),
+        Key::Text(id) => id,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #[derive(serde::Deserialize)]

@@ -7,6 +7,7 @@ use spoons_api_client::Client;
 
 mod dump;
 mod prices;
+mod tiers;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -37,6 +38,11 @@ enum Command {
         #[arg(long, default_value = "data")]
         data: PathBuf,
     },
+    /// Rank every pub by what a round of staples costs there, into tiers.md and tiers.json.
+    Tiers {
+        #[arg(long, default_value = "data")]
+        data: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -60,5 +66,6 @@ async fn main() -> Result<()> {
             prices::build(&out)
         }
         Command::Prices { data } => prices::build(&data),
+        Command::Tiers { data } => tiers::build(&data),
     }
 }

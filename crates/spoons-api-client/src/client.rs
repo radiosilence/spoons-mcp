@@ -181,7 +181,7 @@ impl Client {
         self.get(&paths::menus(venue, sales_area)).await
     }
 
-    pub async fn menu(&self, venue: u64, sales_area: u64, menu: u64) -> Result<Menu, Error> {
+    pub async fn menu(&self, venue: u64, sales_area: u64, menu: &str) -> Result<Menu, Error> {
         self.get(&paths::menu(venue, sales_area, menu)).await
     }
 }
@@ -210,7 +210,7 @@ pub mod paths {
         format!("{FRANCHISE}/venues/{venue}/sales-areas/{sales_area}/menus")
     }
 
-    pub fn menu(venue: u64, sales_area: u64, menu: u64) -> String {
+    pub fn menu(venue: u64, sales_area: u64, menu: &str) -> String {
         format!("{FRANCHISE}/venues/{venue}/sales-areas/{sales_area}/menus/{menu}")
     }
 }

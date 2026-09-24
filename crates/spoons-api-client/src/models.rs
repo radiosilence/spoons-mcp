@@ -143,8 +143,9 @@ pub struct WaitTimes {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MenuSummary {
-    #[serde(deserialize_with = "crate::de::id")]
-    pub id: u64,
+    /// Usually a number, but a pub's specials menu is just `specials`.
+    #[serde(deserialize_with = "crate::de::key")]
+    pub id: String,
     /// `Drinks`, `Breakfast`, `Real Ales` and so on.
     pub name: String,
     /// The internal name, which says which season's menu it is: `Drinks Main JUL26`.
@@ -159,8 +160,8 @@ pub struct MenuSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Menu {
-    #[serde(deserialize_with = "crate::de::id")]
-    pub id: u64,
+    #[serde(deserialize_with = "crate::de::key")]
+    pub id: String,
     pub name: String,
     pub description: Option<String>,
     pub updated: Option<String>,

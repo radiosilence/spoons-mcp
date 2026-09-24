@@ -43,7 +43,7 @@ async fn dump_pub(client: &Client, dir: &Path, venue: u64, menus: Menus) -> Resu
         let list: Vec<MenuSummary> = data(&fetch(client, &paths::menus(venue, area.id), &dir.join(format!("menus-{}.json", area.id)), false).await?)?;
         for menu in list.iter().filter(|menu| wanted(menu, menus)) {
             let path = dir.join(format!("menu-{}-{}.json.gz", area.id, menu.id));
-            fetch(client, &paths::menu(venue, area.id, menu.id), &path, true).await?;
+            fetch(client, &paths::menu(venue, area.id, &menu.id), &path, false).await?;
         }
     }
     Ok(())
