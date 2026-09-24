@@ -1,0 +1,16 @@
+[package]
+name = "spoons-api-client"
+version = "0.1.0"
+description = "Client for the API behind Wetherspoon's order-and-pay app"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
