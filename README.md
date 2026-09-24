@@ -31,7 +31,7 @@ A round is a pint each of Carling, Guinness, Abbot Ale and Strongbow, a 250 ml g
 double Bell's with a mixer. These are sold at nearly every pub and their prices vary; Abbot stands in for Doom Bar,
 which one pub in seven doesn't sell. Each pub's price for each drink is set against the median across all pubs, and
 the average of those ratios is the pub's index, so a pub missing one drink still ranks fairly. Tiers are by rank, S
-being the cheapest tenth and F the dearest twentieth. Pubs in the Republic of Ireland are ranked separately, in euros.
+being the cheapest tenth and F the dearest twentieth; pubs charging the same share a tier, since prices come in zones. Airport pubs are ranked separately, as an airside price says nothing about a town. Pubs in the Republic of Ireland sell neither Carling nor Bell's, so Coors and Jameson stand in and they are ranked in euros.
 
 ## Things worth knowing about the API
 
@@ -45,3 +45,8 @@ being the cheapest tenth and F the dearest twentieth. Pubs in the Republic of Ir
   naming this project, is refused with a 403, so the client sends the site's own headers.
 - **IDs are numbers or strings depending on the app version sent**, and a pub's specials menu has the ID `specials`.
 - **The six pubs in the Republic of Ireland price in euros.**
+- **Not every pub is under `jdw`.** Two dozen are Wetherspoon bars run for someone else: on Haven holiday parks,
+  university campuses and Papa's sites. Their routes use their own franchise, and the Haven bars have no menus in
+  the app at all.
+- **A size's label can carry its calories** (`250ml glass (185 kcal, 3.0 units)`), and which label a pub gets has
+  changed from one menu version to the next, so sizes are matched by how the label starts.

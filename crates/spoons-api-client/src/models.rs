@@ -4,10 +4,17 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+fn jdw() -> String {
+    crate::client::FRANCHISE.to_owned()
+}
+
 /// A pub in the venue list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VenueSummary {
+    /// Which operator's routes the pub is under: `jdw` for Wetherspoon's own, or a holiday park or university.
+    #[serde(default = "jdw")]
+    pub franchise: String,
     /// Internal; routes take `venue_ref`.
     #[serde(deserialize_with = "crate::de::id")]
     pub id: u64,
@@ -53,6 +60,10 @@ pub struct Location {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Venue {
+    #[serde(default = "jdw")]
+    pub franchise: String,
+    /// `airport`, `haven`, `concession`, or nothing for a high-street pub.
+    pub sub_type: Option<String>,
     #[serde(deserialize_with = "crate::de::id")]
     pub id: u64,
     #[serde(deserialize_with = "crate::de::id")]

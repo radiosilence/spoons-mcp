@@ -14,6 +14,8 @@ use crate::dump::{data, read};
 struct Row<'a> {
     venue_ref: u64,
     pub_name: &'a str,
+    /// `airport` and the like; nothing for a high-street pub.
+    sub_type: Option<&'a str>,
     town: Option<&'a str>,
     country: &'a str,
     currency: &'a str,
@@ -61,6 +63,7 @@ pub fn build(dir: &Path) -> Result<()> {
                         serde_json::to_writer(&mut out, &Row {
                             venue_ref: venue.venue_ref,
                             pub_name: &venue.name,
+                            sub_type: venue.sub_type.as_deref(),
                             town: venue.address.town.as_deref(),
                             country: &venue.address.country.name,
                             currency,

@@ -18,8 +18,9 @@ const DEFAULT_BASE: &str = "https://ca.jdw-apps.net/api/v0.1";
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 /// What the site reported when this was written; the live one is read from the bundle.
 const APP_VERSION: &str = "6.9.1";
-/// Every route but the venue list sits under the franchise, and 404s without it.
-const FRANCHISE: &str = "jdw";
+/// Every route but the venue list sits under the pub's franchise, and 404s under any other. Most pubs are `jdw`; the
+/// rest are Wetherspoon bars run for someone else, on holiday parks and university campuses.
+pub const FRANCHISE: &str = "jdw";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -163,55 +164,53 @@ impl Client {
         self.get(&paths::venues()).await
     }
 
-    pub async fn venue(&self, venue: u64) -> Result<Venue, Error> {
-        self.get(&paths::venue(venue)).await
+    pub async fn venue(&self, franchise: &str, venue: u64) -> Result<Venue, Error> {
+        self.get(&paths::venue(franchise, venue)).await
     }
 
     /// The real ales on, and those coming soon.
-    pub async fn ales(&self, venue: u64) -> Result<Vec<Ale>, Error> {
-        self.get(&paths::ales(venue)).await
+    pub async fn ales(&self, franchise: &str, venue: u64) -> Result<Vec<Ale>, Error> {
+        self.get(&paths::ales(franchise, venue)).await
     }
 
     /// How long an order is taking, in minutes. Live.
-    pub async fn wait_times(&self, venue: u64) -> Result<WaitTimes, Error> {
-        self.get(&paths::wait_times(venue)).await
+    pub async fn wait_times(&self, franchise: &str, venue: u64) -> Result<WaitTimes, Error> {
+        self.get(&paths::wait_times(franchise, venue)).await
     }
 
-    pub async fn menus(&self, venue: u64, sales_area: u64) -> Result<Vec<MenuSummary>, Error> {
-        self.get(&paths::menus(venue, sales_area)).await
+    pub async fn menus(&self, franchise: &str, venue: u64, sales_area: u64) -> Result<Vec<MenuSummary>, Error> {
+        self.get(&paths::menus(franchise, venue, sales_area)).await
     }
 
-    pub async fn menu(&self, venue: u64, sales_area: u64, menu: &str) -> Result<Menu, Error> {
-        self.get(&paths::menu(venue, sales_area, menu)).await
+    pub async fn menu(&self, franchise: &str, venue: u64, sales_area: u64, menu: &str) -> Result<Menu, Error> {
+        self.get(&paths::menu(franchise, venue, sales_area, menu)).await
     }
 }
 
 /// Route paths, relative to the API base, for fetching a body as it comes with [`Client::raw`].
 pub mod paths {
-    use super::FRANCHISE;
-
     pub fn venues() -> String {
         "venues".to_owned()
     }
 
-    pub fn venue(venue: u64) -> String {
-        format!("{FRANCHISE}/venues/{venue}")
+    pub fn venue(franchise: &str, venue: u64) -> String {
+        format!("{franchise}/venues/{venue}")
     }
 
-    pub fn ales(venue: u64) -> String {
-        format!("{FRANCHISE}/venues/{venue}/ales")
+    pub fn ales(franchise: &str, venue: u64) -> String {
+        format!("{franchise}/venues/{venue}/ales")
     }
 
-    pub fn wait_times(venue: u64) -> String {
-        format!("{FRANCHISE}/venues/{venue}/wait-times")
+    pub fn wait_times(franchise: &str, venue: u64) -> String {
+        format!("{franchise}/venues/{venue}/wait-times")
     }
 
-    pub fn menus(venue: u64, sales_area: u64) -> String {
-        format!("{FRANCHISE}/venues/{venue}/sales-areas/{sales_area}/menus")
+    pub fn menus(franchise: &str, venue: u64, sales_area: u64) -> String {
+        format!("{franchise}/venues/{venue}/sales-areas/{sales_area}/menus")
     }
 
-    pub fn menu(venue: u64, sales_area: u64, menu: &str) -> String {
-        format!("{FRANCHISE}/venues/{venue}/sales-areas/{sales_area}/menus/{menu}")
+    pub fn menu(franchise: &str, venue: u64, sales_area: u64, menu: &str) -> String {
+        format!("{franchise}/venues/{venue}/sales-areas/{sales_area}/menus/{menu}")
     }
 }
 
