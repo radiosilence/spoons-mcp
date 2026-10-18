@@ -205,7 +205,9 @@ pub struct ItemGroup {
 pub enum Item {
     Product(Box<Product>),
     Ale(Box<Ale>),
-    Text { text: String },
+    Text {
+        text: String,
+    },
     Divider,
     #[serde(other)]
     Other,

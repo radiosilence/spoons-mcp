@@ -56,12 +56,21 @@ pub enum Menus {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
         .with_writer(std::io::stderr)
         .init();
     match Cli::parse().command {
-        Command::Dump { out, menus, interval_ms, only } => {
-            let client = Client::discover().await?.with_interval(Duration::from_millis(interval_ms));
+        Command::Dump {
+            out,
+            menus,
+            interval_ms,
+            only,
+        } => {
+            let client = Client::discover()
+                .await?
+                .with_interval(Duration::from_millis(interval_ms));
             dump::run(&client, &out, menus, &only).await?;
             prices::build(&out)
         }

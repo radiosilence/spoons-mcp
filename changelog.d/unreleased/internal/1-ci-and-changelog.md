@@ -1,0 +1,1 @@
+- **CI and changelog fragments.** Pull requests are checked for formatting, clippy warnings, tests and changelog fragments, and `CHANGELOG.md` is generated from `changelog.d/` so concurrent pull requests never conflict on it.
