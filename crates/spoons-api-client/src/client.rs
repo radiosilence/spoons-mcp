@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use regex::Regex;
 use reqwest::StatusCode;
-use reqwest::header::{AUTHORIZATION, CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue, ORIGIN, REFERER};
+use reqwest::header::{
+    AUTHORIZATION, CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue, ORIGIN, REFERER,
+};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
@@ -29,7 +31,11 @@ pub enum Error {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
     #[error("{status} from {path}: {body}")]
-    Status { status: u16, path: String, body: String },
+    Status {
+        status: u16,
+        path: String,
+        body: String,
+    },
     #[error("unexpected response from {path}: {source}")]
     Decode {
         path: String,
@@ -59,7 +65,13 @@ impl Client {
             return Self::new(&key, DEFAULT_BASE, APP_VERSION);
         }
         let http = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
-        let shell = http.get(APP).send().await?.error_for_status()?.text().await?;
+        let shell = http
+            .get(APP)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
         let bundle = Regex::new(r"/assets/index-[\w-]+\.js")
             .expect("valid pattern")
             .find(&shell)
@@ -91,7 +103,10 @@ impl Client {
         headers.insert(AUTHORIZATION, bearer);
         headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
         headers.insert(ORIGIN, HeaderValue::from_static(APP));
-        headers.insert(REFERER, HeaderValue::from_static("https://order.jdwetherspoon.com/"));
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static("https://order.jdwetherspoon.com/"),
+        );
         headers.insert(
             HeaderName::from_static("app-version"),
             HeaderValue::from_str(app_version).unwrap_or(HeaderValue::from_static(APP_VERSION)),
@@ -178,12 +193,24 @@ impl Client {
         self.get(&paths::wait_times(franchise, venue)).await
     }
 
-    pub async fn menus(&self, franchise: &str, venue: u64, sales_area: u64) -> Result<Vec<MenuSummary>, Error> {
+    pub async fn menus(
+        &self,
+        franchise: &str,
+        venue: u64,
+        sales_area: u64,
+    ) -> Result<Vec<MenuSummary>, Error> {
         self.get(&paths::menus(franchise, venue, sales_area)).await
     }
 
-    pub async fn menu(&self, franchise: &str, venue: u64, sales_area: u64, menu: &str) -> Result<Menu, Error> {
-        self.get(&paths::menu(franchise, venue, sales_area, menu)).await
+    pub async fn menu(
+        &self,
+        franchise: &str,
+        venue: u64,
+        sales_area: u64,
+        menu: &str,
+    ) -> Result<Menu, Error> {
+        self.get(&paths::menu(franchise, venue, sales_area, menu))
+            .await
     }
 }
 
@@ -248,8 +275,14 @@ mod tests {
     #[test]
     fn reads_a_setting_from_the_bundle() {
         let bundle = r#"DUe={BASE_URL:"/",VITE_API_PROXY_BASE_URL:"https://ca.jdw-apps.net/api",VITE_API_PROXY_KEY:"1|abc",VITE_API_PROXY_VERSION:"v0.1"}"#;
-        assert_eq!(setting(bundle, "VITE_API_PROXY_KEY").as_deref(), Some("1|abc"));
-        assert_eq!(setting(bundle, "VITE_API_PROXY_VERSION").as_deref(), Some("v0.1"));
+        assert_eq!(
+            setting(bundle, "VITE_API_PROXY_KEY").as_deref(),
+            Some("1|abc")
+        );
+        assert_eq!(
+            setting(bundle, "VITE_API_PROXY_VERSION").as_deref(),
+            Some("v0.1")
+        );
         assert_eq!(setting(bundle, "VITE_NOPE"), None);
     }
 }

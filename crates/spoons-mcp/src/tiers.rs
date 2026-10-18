@@ -32,7 +32,14 @@ const IRISH_BASKET: [(&str, &str); 6] = [
 const ENOUGH: usize = 4;
 
 /// Cheapest first. Each tier is the pubs up to that share of the way through the ranking.
-const TIERS: [(&str, f64); 6] = [("S", 0.10), ("A", 0.30), ("B", 0.55), ("C", 0.80), ("D", 0.95), ("F", 1.0)];
+const TIERS: [(&str, f64); 6] = [
+    ("S", 0.10),
+    ("A", 0.30),
+    ("B", 0.55),
+    ("C", 0.80),
+    ("D", 0.95),
+    ("F", 1.0),
+];
 
 #[derive(Deserialize)]
 struct Row {
@@ -74,14 +81,26 @@ pub fn build(dir: &Path) -> Result<()> {
         if row.category.starts_with("Includes") || row.category.contains(" for ") {
             continue;
         }
-        let basket = if row.currency == "EUR" { &IRISH_BASKET } else { &BASKET };
-        let Some((product, portion)) = basket.iter().find(|(product, portion)| row.product == *product && row.portion.starts_with(portion)) else {
+        let basket = if row.currency == "EUR" {
+            &IRISH_BASKET
+        } else {
+            &BASKET
+        };
+        let Some((product, portion)) = basket
+            .iter()
+            .find(|(product, portion)| row.product == *product && row.portion.starts_with(portion))
+        else {
             continue;
         };
         let key = format!("{product} ({portion})");
         let price = row.price;
-        let (_, prices) = pubs.entry(row.venue_ref).or_insert_with(|| (row, HashMap::new()));
-        prices.entry(key).and_modify(|existing| *existing = existing.min(price)).or_insert(price);
+        let (_, prices) = pubs
+            .entry(row.venue_ref)
+            .or_insert_with(|| (row, HashMap::new()));
+        prices
+            .entry(key)
+            .and_modify(|existing| *existing = existing.min(price))
+            .or_insert(price);
     }
 
     let mut out = String::from("# Wetherspoon's, by what a round costs\n\n");
@@ -90,11 +109,21 @@ pub fn build(dir: &Path) -> Result<()> {
     out += "Tiers are by rank: S is the cheapest tenth, F the dearest twentieth, and pubs charging the same share a tier. Airport pubs are ranked separately.\n";
 
     let mut ranked_all = Vec::new();
-    for (currency, airports, heading) in [("GBP", false, "UK and the Isle of Man"), ("GBP", true, "UK airports"), ("EUR", false, "Republic of Ireland")] {
-        let basket = if currency == "EUR" { &IRISH_BASKET } else { &BASKET };
+    for (currency, airports, heading) in [
+        ("GBP", false, "UK and the Isle of Man"),
+        ("GBP", true, "UK airports"),
+        ("EUR", false, "Republic of Ireland"),
+    ] {
+        let basket = if currency == "EUR" {
+            &IRISH_BASKET
+        } else {
+            &BASKET
+        };
         let group: Vec<_> = pubs
             .values()
-            .filter(|(row, _)| row.currency == currency && (row.sub_type.as_deref() == Some("airport")) == airports)
+            .filter(|(row, _)| {
+                row.currency == currency && (row.sub_type.as_deref() == Some("airport")) == airports
+            })
             .collect();
         if group.is_empty() {
             continue;
@@ -103,7 +132,10 @@ pub fn build(dir: &Path) -> Result<()> {
             .iter()
             .map(|(product, portion)| format!("{product} ({portion})"))
             .filter_map(|key| {
-                let mut prices: Vec<f64> = group.iter().filter_map(|(_, prices)| prices.get(&key).copied()).collect();
+                let mut prices: Vec<f64> = group
+                    .iter()
+                    .filter_map(|(_, prices)| prices.get(&key).copied())
+                    .collect();
                 (!prices.is_empty()).then(|| (key, median(&mut prices)))
             })
             .collect();
@@ -112,7 +144,10 @@ pub fn build(dir: &Path) -> Result<()> {
             .iter()
             .filter(|(_, prices)| prices.len() >= ENOUGH)
             .map(|(row, prices)| {
-                let ratios: Vec<f64> = prices.iter().filter_map(|(key, price)| medians.get(key).map(|median| price / median)).collect();
+                let ratios: Vec<f64> = prices
+                    .iter()
+                    .filter_map(|(key, price)| medians.get(key).map(|median| price / median))
+                    .collect();
                 let index = ratios.iter().sum::<f64>() / ratios.len() as f64;
                 Ranked {
                     tier: "",
@@ -139,7 +174,10 @@ pub fn build(dir: &Path) -> Result<()> {
             ranked[i].tier = if airports {
                 "airport"
             } else {
-                TIERS.iter().find(|(_, share)| through <= *share + f64::EPSILON).map_or("F", |(tier, _)| tier)
+                TIERS
+                    .iter()
+                    .find(|(_, share)| through <= *share + f64::EPSILON)
+                    .map_or("F", |(tier, _)| tier)
             };
         }
 
@@ -148,7 +186,12 @@ pub fn build(dir: &Path) -> Result<()> {
         if airports {
             out += "\n";
             for pub_ in &ranked {
-                out += &format!("- {symbol}{:.2} {}, {}\n", pub_.round, pub_.pub_name, pub_.town.as_deref().unwrap_or(&pub_.country));
+                out += &format!(
+                    "- {symbol}{:.2} {}, {}\n",
+                    pub_.round,
+                    pub_.pub_name,
+                    pub_.town.as_deref().unwrap_or(&pub_.country)
+                );
             }
             ranked_all.extend(ranked);
             continue;
@@ -158,23 +201,44 @@ pub fn build(dir: &Path) -> Result<()> {
             if members.is_empty() {
                 continue;
             }
-            out += &format!("\n### {tier} ({} pubs, {symbol}{:.2}–{symbol}{:.2})\n\n", members.len(), members[0].round, members[members.len() - 1].round);
+            out += &format!(
+                "\n### {tier} ({} pubs, {symbol}{:.2}–{symbol}{:.2})\n\n",
+                members.len(),
+                members[0].round,
+                members[members.len() - 1].round
+            );
             for pub_ in members {
-                out += &format!("- {symbol}{:.2} {}, {}\n", pub_.round, pub_.pub_name, pub_.town.as_deref().unwrap_or(&pub_.country));
+                out += &format!(
+                    "- {symbol}{:.2} {}, {}\n",
+                    pub_.round,
+                    pub_.pub_name,
+                    pub_.town.as_deref().unwrap_or(&pub_.country)
+                );
             }
         }
         ranked_all.extend(ranked);
     }
     fs::write(dir.join("tiers.md"), out)?;
-    fs::write(dir.join("tiers.json"), serde_json::to_vec_pretty(&ranked_all)?)?;
-    tracing::info!("{} pubs ranked into {}", ranked_all.len(), dir.join("tiers.md").display());
+    fs::write(
+        dir.join("tiers.json"),
+        serde_json::to_vec_pretty(&ranked_all)?,
+    )?;
+    tracing::info!(
+        "{} pubs ranked into {}",
+        ranked_all.len(),
+        dir.join("tiers.md").display()
+    );
     Ok(())
 }
 
 fn median(values: &mut [f64]) -> f64 {
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 { (values[middle - 1] + values[middle]) / 2.0 } else { values[middle] }
+    if values.len().is_multiple_of(2) {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    }
 }
 
 #[cfg(test)]

@@ -38,7 +38,15 @@ mod tests {
 
     #[test]
     fn takes_either() {
-        assert_eq!(serde_json::from_str::<Thing>(r#"{"id":34597}"#).unwrap().id, 34597);
-        assert_eq!(serde_json::from_str::<Thing>(r#"{"id":"34597"}"#).unwrap().id, 34597);
+        assert_eq!(
+            serde_json::from_str::<Thing>(r#"{"id":34597}"#).unwrap().id,
+            34597
+        );
+        assert_eq!(
+            serde_json::from_str::<Thing>(r#"{"id":"34597"}"#)
+                .unwrap()
+                .id,
+            34597
+        );
     }
 }
