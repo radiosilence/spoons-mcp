@@ -1,0 +1,184 @@
+name: CI/CD
+
+# CI only: nothing is published or deployed, so there is no CD half yet. The
+# name and layout match the repositories that do ship, so a release half can
+# be added after `Checks` without renaming the workflow.
+#
+# Every job ends in `Checks`, the one status a ruleset should require. Each
+# job runs only for the domains the change touches (see `changes`); a skipped
+# job passes `Checks`, a failed or cancelled one fails it. Jobs can therefore
+# be added, renamed or skipped without touching branch protection.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Runs every job.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+# A pull request's newer push cancels its older run, and a newer push to main
+# cancels an older one. A manual run is never cancelled.
+concurrency:
+  group: "ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}"
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+        # The domains a change touches, from its diff. A pull request's is
+        # against its base. A push's is against the last commit on main whose
+        # run passed, so a push whose run was cancelled or failed is still
+        # checked by the next one. A manual run, a push with no passing run in
+        # its last two hundred commits, or a diff that cannot be worked out,
+        # runs everything.
+        #
+        # Allowlists, so the question is "did any source of this domain
+        # change?" rather than "was everything recognisably irrelevant?". A
+        # new top-level directory of code is invisible here until it is added
+        # below. Markdown is documentation wherever it sits.
+        #
+        # Steps run under `bash -eo pipefail`, where grep finding nothing is a
+        # failing command rather than an answer, so every question is asked in
+        # a condition, and no grep exits early (`-q`) on a pipe whose writer
+        # would then fail.
+        run: |
+          rust=true
+          base=HEAD^1
+          if [ "$EVENT" = "push" ]; then
+            base=
+            if passed=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci-cd.yml --branch main --event push \
+                  --status success --limit 1 --json headSha --jq '.[0].headSha // empty') \
+              && [ -n "$passed" ] && git fetch -q --deepen=200 origin main \
+              && git merge-base --is-ancestor "$passed" HEAD; then
+              base=$passed
+              # A re-run of a commit that passed diffs against its parent.
+              if [ "$passed" = "$(git rev-parse HEAD)" ]; then
+                base=HEAD^1
+              fi
+            else
+              echo "no passing run to diff against -- running everything"
+            fi
+          fi
+          touches() { printf '%s\n' "$files" | grep -E "$1" | grep -vE '\.md$' > /dev/null; }
+          if [ "$EVENT" != "workflow_dispatch" ] && [ -n "$base" ] && files=$(git diff --name-only "$base" HEAD); then
+            echo "changes since $(git rev-parse --short "$base"):"
+            printf '%s\n' "$files" | sed 's/^/  /'
+            # Anything cargo compiles or that decides how. The justfile and
+            # mise.toml reach no job: each installs its toolchain itself and
+            # runs cargo directly.
+            touches '^crates/|^Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain|^\.github/' || rust=false
+          fi
+          echo "rust=$rust" | tee -a "$GITHUB_OUTPUT"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: test
+          cache-on-failure: true
+      # Offline: the API's firewall and token make the live service unfit for
+      # CI, so tests run against inline samples.
+      - run: cargo test --workspace --locked
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: lint
+          cache-on-failure: true
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+        with:
+          toolchain: stable
+      - run: cargo fmt --all -- --check
+
+  # CHANGELOG.md is generated from changelog.d/ (scripts/changelog.py). A pull
+  # request adds fragments without regenerating it, so only its fragments and
+  # the released versions are checked; one that writes CHANGELOG.md must write
+  # exactly what the fragments make. Every change carries a fragment, so this
+  # runs for all of them.
+  changelog:
+    name: Changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - run: python3 -m unittest scripts/test_changelog.py
+      - env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "pull_request" ] && git diff --name-only HEAD^1 HEAD | grep -qx CHANGELOG.md; then
+            python3 scripts/changelog.py --check
+          else
+            python3 scripts/changelog.py --lint
+          fi
+
+  # The one status a ruleset should require. Skipped jobs are domains the
+  # change does not touch and pass; anything failed or cancelled fails it.
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [changes, test, lint, format, changelog]
+    if: always()
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(" ")')
+          if [ -n "$bad" ]; then
+            echo "::error::not passed: $bad"
+            exit 1
+          fi

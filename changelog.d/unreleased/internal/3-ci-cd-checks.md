@@ -1,0 +1,1 @@
+- **One CI pipeline gated by `Checks`.** The workflow is now `ci-cd.yml`; its Rust jobs run only when a change touches Rust sources, and `Checks` is the single status the ruleset requires.

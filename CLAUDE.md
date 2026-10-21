@@ -24,3 +24,9 @@ just fmt
 ```
 
 `data/` and `recon/` are gitignored working output; tests never call the live API.
+
+## CI
+
+`.github/workflows/ci-cd.yml` ends in one job, `Checks`, which is the only status the ruleset requires; it passes when every other job succeeded or was skipped. A job is skipped when the change does not touch its domain, so a docs-only or changelog-only change runs no Rust job. The `changes` job decides the domains from the diff: a pull request against its base, a push against the last main commit whose run passed, and a manual run, or any diff it cannot work out, runs everything. Markdown never counts, and `.github/` counts for every domain.
+
+To add a domain, give `changes` an output and an allowlist of the paths that reach it, gate the new jobs with `if: needs.changes.outputs.<domain> == 'true'`, and add them to `Checks`'s `needs`. A job with no domain (like `Changelog`) runs on every change.
