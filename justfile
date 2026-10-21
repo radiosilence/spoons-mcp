@@ -3,8 +3,8 @@
 # What CI checks: format, lint with warnings as errors, tests.
 check:
     cargo fmt --all -- --check
-    cargo clippy --all-targets -- -D warnings
-    cargo test --locked
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo test --workspace --locked
 
 # Format
 fmt:

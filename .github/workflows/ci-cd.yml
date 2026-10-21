@@ -1,8 +1,6 @@
 name: CI/CD
 
-# CI only: nothing is published or deployed, so there is no CD half yet. The
-# name and layout match the repositories that do ship, so a release half can
-# be added after `Checks` without renaming the workflow.
+# CI only: nothing is published or deployed.
 #
 # Every job ends in `Checks`, the one status a ruleset should require. Each
 # job runs only for the domains the change touches (see `changes`); a skipped
@@ -22,10 +20,11 @@ env:
   CARGO_TERM_COLOR: always
 
 # A pull request's newer push cancels its older run, and a newer push to main
-# cancels an older one. A manual run is never cancelled.
+# cancels an older one. A manual run has a group of its own, so nothing
+# cancels it.
 concurrency:
   group: "ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}"
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -71,7 +70,8 @@ jobs:
               && [ -n "$passed" ] && git fetch -q --deepen=200 origin main \
               && git merge-base --is-ancestor "$passed" HEAD; then
               base=$passed
-              # A re-run of a commit that passed diffs against its parent.
+              # A commit that already passed in another run diffs against its
+              # parent: against itself the diff would be empty.
               if [ "$passed" = "$(git rev-parse HEAD)" ]; then
                 base=HEAD^1
               fi
@@ -86,7 +86,7 @@ jobs:
             # Anything cargo compiles or that decides how. The justfile and
             # mise.toml reach no job: each installs its toolchain itself and
             # runs cargo directly.
-            touches '^crates/|^Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain|^\.github/' || rust=false
+            touches '^crates/|^Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain|^\.?(rustfmt|clippy)\.toml$|^\.github/' || rust=false
           fi
           echo "rust=$rust" | tee -a "$GITHUB_OUTPUT"
 
@@ -98,7 +98,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -118,7 +118,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -136,7 +136,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
       - run: cargo fmt --all -- --check
