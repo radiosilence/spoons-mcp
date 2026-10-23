@@ -1,10 +1,17 @@
 # spoons-mcp — Wetherspoon's pubs, menus and prices from the order-and-pay API
 
-# What CI checks: format, lint with warnings as errors, tests.
+# What CI checks: the workflows, format, lint with warnings as errors, tests.
 check:
+    actionlint
+    git diff --quiet Cargo.lock || { echo 'Cargo.lock has uncommitted changes'; exit 1; }
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
     cargo test --workspace --locked
+
+# The checks that take seconds, run before every push; CI runs the rest.
+fast:
+    git diff --quiet Cargo.lock || { echo 'Cargo.lock has uncommitted changes'; exit 1; }
+    cargo fmt --all -- --check
 
 # Format
 fmt:

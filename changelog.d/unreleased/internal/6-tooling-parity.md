@@ -1,0 +1,1 @@
+- **Workflow lint, dependency audit and dependabot.** CI runs actionlint on every change and a blocking `cargo audit` on dependency changes (every push to main), dependabot raises weekly grouped updates for actions and crates, and a pre-push hook runs `just fast`.
