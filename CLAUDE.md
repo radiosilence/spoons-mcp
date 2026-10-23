@@ -19,7 +19,8 @@ Client and command-line tool for the unofficial API behind Wetherspoon's order-a
 ## Check
 
 ```sh
-just check   # fmt --check, clippy -D warnings, tests (offline)
+just check   # actionlint, Cargo.lock drift, fmt --check, clippy -D warnings, tests (offline)
+just fast    # the seconds-long subset; the pre-push hook runs it
 just fmt
 ```
 
@@ -29,4 +30,4 @@ just fmt
 
 `.github/workflows/ci-cd.yml` ends in one job, `Checks`, which is the only status the ruleset requires; it passes when every other job succeeded or was skipped. A job is skipped when the change does not touch its domain, so a docs-only or changelog-only change runs no Rust job. The `changes` job decides the domains from the diff: a pull request against its base, a push against the last main commit whose run passed, and a manual run, or any diff it cannot work out, runs everything. Markdown never counts, and `.github/` counts for every domain.
 
-To add a domain, give `changes` an output and an allowlist of the paths that reach it, gate the new jobs with `if: needs.changes.outputs.<domain> == 'true'`, and add them to `Checks`'s `needs`. A job with no domain (like `Changelog`) runs on every change.
+To add a domain, give `changes` an output and an allowlist of the paths that reach it, gate the new jobs with `if: needs.changes.outputs.<domain> == 'true'`, and add them to `Checks`'s `needs`. A job with no domain (like `Changelog` and `Actionlint`) runs on every change. `Security Audit` runs on every push to main, since an advisory can appear without the code changing, and on pull requests only when dependencies change. An advisory that cannot yet be fixed is acknowledged in `.cargo/audit.toml` with the reason and what would let it be dropped.
