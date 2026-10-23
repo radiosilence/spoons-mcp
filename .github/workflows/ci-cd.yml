@@ -71,7 +71,8 @@ jobs:
         # a condition, and no grep exits early (`-q`) on a pipe whose writer
         # would then fail.
         run: |
-          rust=true deps=true
+          rust=true deps=true build=true release=false
+          version_of() { sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
           base=HEAD^1
           if [ "$EVENT" = "push" ]; then
             base=
@@ -132,10 +133,18 @@ jobs:
               # A new advisory can land on any day; main audits every push.
               touches '^Cargo\.lock$|Cargo\.toml$|^\.cargo/|^\.github/' || deps=false
             fi
+            # The release binaries. The Rust jobs already check the code, so
+            # these build outside a release only when the lockfile or the
+            # recipe changed, since the musl build compiles C dependencies
+            # (aws-lc-sys) the tests' glibc build does not.
+            touches '^Cargo\.lock$|^\.github/' || build=false
           fi
           {
             echo "rust=$rust"
             echo "deps=$deps"
+            echo "build=$build"
+            echo "release=$release"
+            echo "version=$version"
           } | tee -a "$GITHUB_OUTPUT"
 
   test:
