@@ -1,6 +1,6 @@
 [package]
 name = "spoons-api-client"
-version = "0.1.0"
+version.workspace = true
 description = "Client for the API behind Wetherspoon's order-and-pay app"
 edition.workspace = true
 license.workspace = true
