@@ -1,6 +1,6 @@
 [package]
 name = "spoons-mcp"
-version = "0.1.0"
+version.workspace = true
 description = "Wetherspoon's pubs, menus, prices and wait times, dumped and served"
 edition.workspace = true
 license.workspace = true

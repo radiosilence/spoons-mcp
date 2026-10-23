@@ -7,6 +7,11 @@ venue list sits under the franchise (`/jdw/…`). The bearer token is built into
 JavaScript bundle, so the client reads it from there at start-up instead of anyone keeping a copy. Only read routes
 are used; the basket, order and payment routes are not.
 
+## Install
+
+Each [GitHub release](https://github.com/radiosilence/spoons-mcp/releases) carries the `spoons` binary for Linux
+(static, x86_64 and arm64) and Apple silicon macOS. From a checkout, `cargo install --path crates/spoons-mcp`.
+
 ## Dump
 
 ```console

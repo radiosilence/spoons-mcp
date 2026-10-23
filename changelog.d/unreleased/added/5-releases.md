@@ -1,0 +1,1 @@
+- **Releases with binaries.** `just release` opens a release pull request; merging it publishes a GitHub release with the `spoons` binary for Linux (x86_64, arm64) and Apple silicon macOS. Both crates now share the workspace version.
