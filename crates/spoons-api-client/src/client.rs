@@ -40,12 +40,11 @@ pub enum Error {
         path: String,
         body: String,
     },
-    /// A request that changes something got no answer, so whether it took effect is unknown.
-    #[error("no answer from {path}, so it may or may not have gone through: {source}")]
-    Unconfirmed {
-        path: String,
-        source: reqwest::Error,
-    },
+    /// A request that changes something got no clear answer, so whether it took effect is unknown.
+    #[error("no clear answer from {path}, so it may or may not have gone through: {detail}")]
+    Unconfirmed { path: String, detail: String },
+    #[error("cancelling isn't safe or didn't take: the payment is {0:?}")]
+    NotCancellable(crate::payments::PaymentStatus),
     #[error("{path} refused: {message}")]
     Refused { path: String, message: String },
     #[error("unexpected response from {path}: {source}")]

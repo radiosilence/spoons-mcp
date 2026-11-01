@@ -15,6 +15,8 @@ pub enum LineError {
         portion: String,
         available: String,
     },
+    #[error("a quantity of nothing")]
+    NoQuantity,
     #[error("{0} needs a choice made, such as a mixer, which isn't supported yet")]
     NeedsChoice(String),
 }
@@ -32,6 +34,9 @@ impl BasketLine {
         portion: Option<&str>,
         quantity: u32,
     ) -> Result<Self, LineError> {
+        if quantity == 0 {
+            return Err(LineError::NoQuantity);
+        }
         if product.is_out_of_stock {
             return Err(LineError::OutOfStock(product.name.clone()));
         }

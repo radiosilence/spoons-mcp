@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderValue, ORIGIN, REFERER};
-use reqwest::{Method, StatusCode, redirect};
+use reqwest::{StatusCode, redirect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::time::sleep;
@@ -63,7 +63,7 @@ pub enum PaymentStatus {
     InProgress,
     /// Paid for, and not yet sent to the pub.
     Paid,
-    /// Paid for and held back as a likely repeat of a recent order. The app asks whether to send it anyway.
+    /// Taken for a repeat of a recent order. The app asks whether to send it anyway or cancel it.
     Duplicate,
     Cancelled,
     Other {
@@ -108,7 +108,7 @@ impl Payments {
             .user_agent(USER_AGENT)
             .default_headers(headers)
             .redirect(redirect::Policy::none())
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(60))
             .build()?;
         Ok(Self {
             http,
@@ -150,40 +150,49 @@ impl Payments {
             "token": order.token,
             "callback_url": callback,
         }));
-        let response = self
+        let unconfirmed = |detail: String| Error::Unconfirmed {
+            path: route.to_owned(),
+            detail,
+        };
+        let response = match self
             .http
             .post(self.url(franchise, venue, route))
             .json(&body)
             .send()
             .await
-            .map_err(|source| Error::Unconfirmed {
-                path: route.to_owned(),
-                source,
-            })?;
+        {
+            Ok(response) => response,
+            Err(error) if error.is_connect() => return Err(error.into()),
+            Err(error) => return Err(unconfirmed(error.to_string())),
+        };
         let status = response.status();
         let bytes = response
             .bytes()
             .await
-            .map_err(|source| Error::Unconfirmed {
-                path: route.to_owned(),
-                source,
-            })?;
-        let answer: Answer<Prepared> =
-            serde_json::from_slice(&bytes).map_err(|_| Error::Status {
-                status: status.as_u16(),
-                path: route.to_owned(),
-                body: String::from_utf8_lossy(&bytes).into_owned(),
-            })?;
+            .map_err(|error| unconfirmed(error.to_string()))?;
+        let text = || String::from_utf8_lossy(&bytes).into_owned();
+        let answer = serde_json::from_slice::<Answer<Prepared>>(&bytes).ok();
         match answer {
-            Answer {
+            Some(Answer {
                 success: true,
                 data: Some(prepared),
                 ..
-            } if status.is_success() => Ok(prepared),
-            Answer { message, .. } => Err(Error::Refused {
+            }) if status.is_success() => Ok(prepared),
+            // Only a 4xx or an explicit refusal means nothing was made; anything else may have made the order.
+            Some(Answer {
+                success: false,
+                message,
+                ..
+            }) => Err(Error::Refused {
                 path: route.to_owned(),
-                message: message.unwrap_or_else(|| String::from_utf8_lossy(&bytes).into_owned()),
+                message: message.unwrap_or_else(text),
             }),
+            None if status.is_client_error() => Err(Error::Status {
+                status: status.as_u16(),
+                path: route.to_owned(),
+                body: text(),
+            }),
+            _ => Err(unconfirmed(format!("{status}: {}", text()))),
         }
     }
 
@@ -208,8 +217,8 @@ impl Payments {
         })
     }
 
-    /// Cancels a payment, as the Axepta page's back link does. Only safe while the status is
-    /// [`PaymentStatus::Pending`]: once a card is being authorised, cancelling can leave a charge with no order.
+    /// Cancels a payment that no card has been entered for, and confirms it is cancelled. Refuses once a card is
+    /// being authorised or paid, since cancelling then can leave a charge with no order.
     pub async fn cancel(
         &self,
         franchise: &str,
@@ -217,32 +226,35 @@ impl Payments {
         transaction: &str,
     ) -> Result<(), Error> {
         let route = format!("payment/{transaction}/cancel");
+        match self.status(franchise, venue, transaction).await? {
+            PaymentStatus::Cancelled => return Ok(()),
+            PaymentStatus::Pending => {}
+            other => return Err(Error::NotCancellable(other)),
+        }
         let mut wait = Duration::from_secs(1);
-        for attempt in 0.. {
+        for attempt in 0..3 {
             let sent = self
                 .http
-                .request(Method::POST, self.url(franchise, venue, &route))
+                .post(self.url(franchise, venue, &route))
                 .json(&self.body(json!({})))
                 .send()
                 .await;
-            let retry = match sent {
-                Ok(response) if response.status().is_success() => return Ok(()),
-                Ok(response) if !response.status().is_server_error() || attempt == 2 => {
-                    return Err(Error::Status {
-                        status: response.status().as_u16(),
-                        path: route,
-                        body: response.text().await.unwrap_or_default(),
-                    });
+            match sent {
+                Ok(response) if !response.status().is_server_error() => break,
+                Ok(response) => {
+                    tracing::warn!(status = %response.status(), route, attempt, "cancel failed")
                 }
-                Err(error) if attempt == 2 => return Err(error.into()),
-                Ok(response) => response.status().to_string(),
-                Err(error) => error.to_string(),
-            };
-            tracing::warn!(%retry, route, "retrying in {wait:?}");
+                Err(error) => tracing::warn!(%error, route, attempt, "cancel failed"),
+            }
             sleep(wait).await;
             wait *= 2;
         }
-        unreachable!()
+        // The answer to the cancel itself is not trusted either way: a retry can be refused because an earlier
+        // attempt already went through.
+        match self.status(franchise, venue, transaction).await? {
+            PaymentStatus::Cancelled => Ok(()),
+            other => Err(Error::NotCancellable(other)),
+        }
     }
 }
 
