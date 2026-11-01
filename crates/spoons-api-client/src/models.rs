@@ -225,6 +225,11 @@ pub struct Product {
     #[serde(default)]
     pub is_out_of_stock: bool,
     pub age_restriction: Option<u32>,
+    pub course_id: Option<u64>,
+    pub display_record_id: Option<u64>,
+    /// How the till knows the product; passed back as it came when ordering.
+    #[serde(default)]
+    pub checkout: Value,
     #[serde(default)]
     pub options: ProductOptions,
     /// Allergens (`AL::…`) and the drink's add-ons, among other things.
@@ -263,9 +268,12 @@ pub struct Portion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PortionOption {
     /// `Pint`, `Half pint`, `Single`, `Double`, `250ml` and so on.
     pub label: String,
+    #[serde(default)]
+    pub is_default: bool,
     pub value: PortionValue,
 }
 
@@ -276,6 +284,18 @@ pub struct PortionValue {
     pub price: Price,
     #[serde(default)]
     pub hidden: bool,
+    /// Choices this size asks for, such as a spirit's mixer.
+    #[serde(default)]
+    pub choices: Vec<PortionChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortionChoice {
+    #[serde(deserialize_with = "crate::de::id")]
+    pub choice_id: u64,
+    #[serde(default)]
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,4 +312,38 @@ pub struct Keyword {
     pub kind: String,
     #[serde(default)]
     pub value: Value,
+    /// Flags the app reads, such as `isVegan`; an empty list when there are none.
+    #[serde(default)]
+    pub tags: Value,
+}
+
+/// A table that can be ordered to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Table {
+    pub number: u32,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(deserialize_with = "crate::de::id")]
+    pub sales_area_id: u64,
+}
+
+/// A basket as the pub's till priced it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BasketValidation {
+    pub id: String,
+    pub total: Price,
+    #[serde(default)]
+    pub items: Vec<ValidatedLine>,
+    /// Signed by the API over the basket and its total; preparing a payment needs it.
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidatedLine {
+    #[serde(deserialize_with = "crate::de::id")]
+    pub id: u64,
+    pub quantity: u32,
+    pub price: Price,
 }

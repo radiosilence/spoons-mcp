@@ -11,13 +11,17 @@ use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep, sleep_until};
 
-use crate::models::{Ale, Menu, MenuSummary, Venue, VenueSummary, WaitTimes};
+use crate::basket::BasketLine;
+use crate::models::{
+    Ale, BasketValidation, Menu, MenuSummary, Table, Venue, VenueSummary, WaitTimes,
+};
+use crate::payments::{self, Payments};
 
-const APP: &str = "https://order.jdwetherspoon.com";
+pub(crate) const APP: &str = "https://order.jdwetherspoon.com";
 const DEFAULT_BASE: &str = "https://ca.jdw-apps.net/api/v0.1";
 /// The API's firewall turns away anything that doesn't look like the order-and-pay site, which runs in a browser, so
 /// requests carry what that site sends: a browser's User-Agent, its origin, and the app version it reports.
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 /// What the site reported when this was written; the live one is read from the bundle.
 const APP_VERSION: &str = "6.9.1";
 /// Every route but the venue list sits under the pub's franchise, and 404s under any other. Most pubs are `jdw`; the
@@ -36,6 +40,14 @@ pub enum Error {
         path: String,
         body: String,
     },
+    /// A request that changes something got no answer, so whether it took effect is unknown.
+    #[error("no answer from {path}, so it may or may not have gone through: {source}")]
+    Unconfirmed {
+        path: String,
+        source: reqwest::Error,
+    },
+    #[error("{path} refused: {message}")]
+    Refused { path: String, message: String },
     #[error("unexpected response from {path}: {source}")]
     Decode {
         path: String,
@@ -51,6 +63,8 @@ pub struct Client {
     base: String,
     next: Arc<Mutex<Instant>>,
     interval: Duration,
+    app_version: String,
+    payments_base: String,
 }
 
 #[derive(Deserialize)]
@@ -94,7 +108,11 @@ impl Client {
             _ => DEFAULT_BASE.to_owned(),
         };
         let version = app_version(&bundle).unwrap_or_else(|| APP_VERSION.to_owned());
-        Self::new(&key, &base, &version)
+        let mut client = Self::new(&key, &base, &version)?;
+        if let Some(payments) = setting(&bundle, "VITE_API_PAYMENT_BASE_URL") {
+            client.payments_base = payments;
+        }
+        Ok(client)
     }
 
     pub fn new(key: &str, base: &str, app_version: &str) -> Result<Self, Error> {
@@ -121,6 +139,8 @@ impl Client {
             base: base.trim_end_matches('/').to_owned(),
             next: Arc::new(Mutex::new(Instant::now())),
             interval: Duration::from_millis(500),
+            app_version: app_version.to_owned(),
+            payments_base: payments::DEFAULT_BASE.to_owned(),
         })
     }
 
@@ -139,13 +159,28 @@ impl Client {
         *next = Instant::now() + self.interval;
     }
 
+    /// A client for the payment API, which identifies the app by `device_id` rather than a key. Keep the id: a
+    /// payment is cancelled with the id that started it.
+    pub fn payments(&self, device_id: &str) -> Result<Payments, Error> {
+        Payments::new(&self.payments_base, &self.app_version, device_id)
+    }
+
     /// The body as sent, for keeping. Rate limits and server errors are retried with a growing wait.
     pub async fn raw(&self, path: &str) -> Result<Vec<u8>, Error> {
+        self.send(path, None).await
+    }
+
+    /// Only for routes that change nothing, since failures are retried.
+    async fn send(&self, path: &str, body: Option<&serde_json::Value>) -> Result<Vec<u8>, Error> {
         let url = format!("{}/{}", self.base, path);
         let mut wait = Duration::from_secs(2);
         for attempt in 0.. {
             self.pace().await;
-            let response = self.http.get(&url).send().await?;
+            let request = match body {
+                Some(body) => self.http.post(&url).json(body),
+                None => self.http.get(&url),
+            };
+            let response = request.send().await?;
             let status = response.status();
             if status.is_success() {
                 return Ok(response.bytes().await?.to_vec());
@@ -166,13 +201,7 @@ impl Client {
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, Error> {
-        let bytes = self.raw(path).await?;
-        serde_json::from_slice::<Envelope<T>>(&bytes)
-            .map(|envelope| envelope.data)
-            .map_err(|source| Error::Decode {
-                path: path.to_owned(),
-                source,
-            })
+        decode(path, &self.raw(path).await?)
     }
 
     pub async fn venues(&self) -> Result<Vec<VenueSummary>, Error> {
@@ -212,6 +241,34 @@ impl Client {
         self.get(&paths::menu(franchise, venue, sales_area, menu))
             .await
     }
+
+    /// Every table, including those not taking orders now (`available` is false).
+    pub async fn tables(&self, franchise: &str, venue: u64) -> Result<Vec<Table>, Error> {
+        self.get(&paths::tables(franchise, venue)).await
+    }
+
+    /// Prices a basket at the till. Changes nothing; the token it returns is what a payment is prepared with.
+    pub async fn validate_basket(
+        &self,
+        franchise: &str,
+        venue: u64,
+        sales_area: u64,
+        lines: &[BasketLine],
+        device_id: &str,
+    ) -> Result<BasketValidation, Error> {
+        let path = paths::validate_basket(franchise, venue, sales_area);
+        let body = serde_json::json!({ "items": lines, "deviceId": device_id });
+        decode(&path, &self.send(&path, Some(&body)).await?)
+    }
+}
+
+fn decode<T: DeserializeOwned>(path: &str, bytes: &[u8]) -> Result<T, Error> {
+    serde_json::from_slice::<Envelope<T>>(bytes)
+        .map(|envelope| envelope.data)
+        .map_err(|source| Error::Decode {
+            path: path.to_owned(),
+            source,
+        })
 }
 
 /// Route paths, relative to the API base, for fetching a body as it comes with [`Client::raw`].
@@ -238,6 +295,14 @@ pub mod paths {
 
     pub fn menu(franchise: &str, venue: u64, sales_area: u64, menu: &str) -> String {
         format!("{franchise}/venues/{venue}/sales-areas/{sales_area}/menus/{menu}")
+    }
+
+    pub fn tables(franchise: &str, venue: u64) -> String {
+        format!("{franchise}/venues/{venue}/tables")
+    }
+
+    pub fn validate_basket(franchise: &str, venue: u64, sales_area: u64) -> String {
+        format!("{franchise}/venues/{venue}/sales-areas/{sales_area}/basket/validate")
     }
 }
 
