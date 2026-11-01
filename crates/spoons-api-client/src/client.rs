@@ -46,6 +46,8 @@ pub enum Error {
     /// Cancelling would be unsafe, or the payment moved on while cancelling: a card is being authorised or has paid.
     #[error("not cancellable: the payment is {0:?}")]
     NotCancellable(crate::payments::PaymentStatus),
+    #[error("only an order held as a duplicate can be sent anyway; the payment is {0:?}")]
+    NotResubmittable(crate::payments::PaymentStatus),
     #[error("{path} refused: {message}")]
     Refused { path: String, message: String },
     #[error("unexpected response from {path}: {source}")]

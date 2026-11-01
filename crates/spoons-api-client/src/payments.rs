@@ -218,8 +218,9 @@ impl Payments {
         })
     }
 
-    /// Cancels a payment that no card has been entered for, and confirms it is cancelled. Refuses once a card is
-    /// being authorised or paid, since cancelling then can leave a charge with no order.
+    /// Cancels a payment that no card has been entered for, or one held as a [`PaymentStatus::Duplicate`] (the app
+    /// offers that too), and confirms it is cancelled. Refuses while a card is being authorised or once the order
+    /// is going through, since cancelling then can leave a charge with no order.
     pub async fn cancel(
         &self,
         franchise: &str,
@@ -229,7 +230,7 @@ impl Payments {
         let route = format!("payment/{transaction}/cancel");
         match self.status(franchise, venue, transaction).await? {
             PaymentStatus::Cancelled => return Ok(()),
-            PaymentStatus::Pending => {}
+            PaymentStatus::Pending | PaymentStatus::Duplicate => {}
             other => return Err(Error::NotCancellable(other)),
         }
         let mut wait = Duration::from_secs(1);
@@ -257,12 +258,57 @@ impl Payments {
         // attempt already went through.
         match self.status(franchise, venue, transaction).await? {
             PaymentStatus::Cancelled => Ok(()),
-            PaymentStatus::Pending => Err(Error::Unconfirmed {
-                path: route,
-                detail: "cancel sent, but the payment is still pending".to_owned(),
-            }),
+            still @ (PaymentStatus::Pending | PaymentStatus::Duplicate) => {
+                Err(Error::Unconfirmed {
+                    path: route,
+                    detail: format!("cancel sent, but the payment is still {still:?}"),
+                })
+            }
             other => Err(Error::NotCancellable(other)),
         }
+    }
+
+    /// Sends an order held as a [`PaymentStatus::Duplicate`] to the pub anyway. Sent once, like a prepare: without a
+    /// clear answer it may have gone through.
+    pub async fn resubmit(
+        &self,
+        franchise: &str,
+        venue: u64,
+        transaction: &str,
+    ) -> Result<(), Error> {
+        let route = format!("payment/{transaction}/process/resubmit");
+        match self.status(franchise, venue, transaction).await? {
+            PaymentStatus::Duplicate => {}
+            other => return Err(Error::NotResubmittable(other)),
+        }
+        let unconfirmed = |detail: String| Error::Unconfirmed {
+            path: route.clone(),
+            detail,
+        };
+        let response = match self
+            .http
+            .post(self.url(franchise, venue, &route))
+            .json(&self.body(json!({})))
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if error.is_connect() => return Err(error.into()),
+            Err(error) => return Err(unconfirmed(error.to_string())),
+        };
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        if status.is_client_error() {
+            return Err(Error::Status {
+                status: status.as_u16(),
+                path: route,
+                body: text,
+            });
+        }
+        if !status.is_success() {
+            return Err(unconfirmed(format!("{status}: {text}")));
+        }
+        Ok(())
     }
 }
 
