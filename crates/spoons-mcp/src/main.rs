@@ -6,6 +6,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use spoons_api_client::Client;
 
 mod dump;
+mod mcp;
+mod orders;
 mod prices;
 mod tiers;
 
@@ -38,6 +40,8 @@ enum Command {
         #[arg(long, default_value = "data")]
         data: PathBuf,
     },
+    /// Serve the MCP tools for finding a pub, reading its menu and ordering to a table, over stdio.
+    Mcp,
     /// Rank every pub by what a round of staples costs there, into tiers.md and tiers.json.
     Tiers {
         #[arg(long, default_value = "data")]
@@ -76,5 +80,6 @@ async fn main() -> Result<()> {
         }
         Command::Prices { data } => prices::build(&data),
         Command::Tiers { data } => tiers::build(&data),
+        Command::Mcp => mcp::serve().await,
     }
 }
