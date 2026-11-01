@@ -1,0 +1,1 @@
+- **Ordering API in the client.** Tables, basket validation and the payment API (prepare a card payment, read its status, cancel it), with basket lines built from menu products. Payment requests that could place an order are never retried.
