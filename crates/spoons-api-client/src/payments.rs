@@ -178,12 +178,13 @@ impl Payments {
                 data: Some(prepared),
                 ..
             }) if status.is_success() => Ok(prepared),
-            // Only a 4xx or an explicit refusal means nothing was made; anything else may have made the order.
+            // Only a 4xx or an explicit refusal below 500 means nothing was made; anything else may have made the
+            // order, since a server error is rendered as a refusal too.
             Some(Answer {
                 success: false,
                 message,
                 ..
-            }) => Err(Error::Refused {
+            }) if !status.is_server_error() => Err(Error::Refused {
                 path: route.to_owned(),
                 message: message.unwrap_or_else(text),
             }),
@@ -246,6 +247,9 @@ impl Payments {
                 }
                 Err(error) => tracing::warn!(%error, route, attempt, "cancel failed"),
             }
+            if attempt == 2 {
+                break;
+            }
             sleep(wait).await;
             wait *= 2;
         }
@@ -253,6 +257,10 @@ impl Payments {
         // attempt already went through.
         match self.status(franchise, venue, transaction).await? {
             PaymentStatus::Cancelled => Ok(()),
+            PaymentStatus::Pending => Err(Error::Unconfirmed {
+                path: route,
+                detail: "cancel sent, but the payment is still pending".to_owned(),
+            }),
             other => Err(Error::NotCancellable(other)),
         }
     }

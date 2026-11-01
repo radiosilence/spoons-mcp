@@ -43,7 +43,8 @@ pub enum Error {
     /// A request that changes something got no clear answer, so whether it took effect is unknown.
     #[error("no clear answer from {path}, so it may or may not have gone through: {detail}")]
     Unconfirmed { path: String, detail: String },
-    #[error("cancelling isn't safe or didn't take: the payment is {0:?}")]
+    /// Cancelling would be unsafe, or the payment moved on while cancelling: a card is being authorised or has paid.
+    #[error("not cancellable: the payment is {0:?}")]
     NotCancellable(crate::payments::PaymentStatus),
     #[error("{path} refused: {message}")]
     Refused { path: String, message: String },
