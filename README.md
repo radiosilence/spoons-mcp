@@ -4,8 +4,8 @@ Wetherspoon's pubs, menus, prices, real ales and wait times, from the API behind
 
 The API is unofficial and undocumented. It is REST, behind a proxy at `ca.jdw-apps.net`, and every route except the
 venue list sits under the franchise (`/jdw/…`). The bearer token is built into the order-and-pay site's public
-JavaScript bundle, so the client reads it from there at start-up instead of anyone keeping a copy. Only read routes
-are used; the basket, order and payment routes are not.
+JavaScript bundle, so the client reads it from there at start-up instead of anyone keeping a copy. Orders and
+payments go through a second API, `api.jdwpayments.net`, which takes no token.
 
 ## Install
 
@@ -37,6 +37,36 @@ double Bell's with a mixer. These are sold at nearly every pub and their prices 
 which one pub in seven doesn't sell. Each pub's price for each drink is set against the median across all pubs, and
 the average of those ratios is the pub's index, so a pub missing one drink still ranks fairly. Tiers are by rank, S
 being the cheapest tenth and F the dearest twentieth; pubs charging the same share a tier, since prices come in zones. Airport pubs are ranked separately, as an airside price says nothing about a town. Pubs in the Republic of Ireland sell neither Carling nor Bell's, so Coors and Jameson stand in and they are ranked in euros.
+
+## MCP server
+
+`spoons mcp` serves tools over stdio for ordering to a table: `find_pubs`, `menu`, `quote`, `pay`, `order_status`,
+`cancel_order` and `send_duplicate`. For Claude Code:
+
+```console
+$ claude mcp add spoons --env SPOONS_EMAIL=you@example.com -- spoons mcp
+```
+
+`SPOONS_EMAIL` is where the receipt goes. Ordering is two steps so the user sees the price before anything starts:
+`quote` prices the basket at the pub's till and changes nothing, and `pay` prepares the card payment and opens the
+payment page (BNP Paribas Axepta) in the browser, where the card is entered and the bank approves it. The tools never
+take card details.
+
+Quotes and payments are kept under `$XDG_STATE_HOME/spoons` (`~/.local/state/spoons`), with a device id the payment
+API needs to cancel a payment it started. The server is careful about the cases that cost money:
+
+- **A payment is never prepared twice for one quote.** `pay` holds a lock on the quote across processes and returns
+  the existing payment when called again.
+- **A request to prepare or send a payment is never retried.** One that gets no clear answer may still have made the
+  order, so the quote is marked unconfirmed and `pay` refuses it until the user has checked for a receipt or charge.
+- **Nothing cancels on its own.** Cancelling while the bank is authorising a card can leave a charge with no order,
+  so `cancel_order` only acts before a card is entered, or on an order held as a duplicate. The payment page cancels
+  itself if abandoned.
+- **Repeat orders are the user's call.** The payment API flags a basket that matches a recent order to the same
+  table, before payment (`pay` asks) or after it (the order is held, and `send_duplicate` or `cancel_order` settles
+  it).
+
+Products that need a choice made, such as a spirit's mixer, can't be quoted yet.
 
 ## Things worth knowing about the API
 

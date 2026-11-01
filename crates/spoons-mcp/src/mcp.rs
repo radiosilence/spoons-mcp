@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
+use rmcp::handler::server::wrapper::Parameters;
 use rmcp::{ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -35,7 +35,6 @@ pub struct Spoons {
     store: Arc<Store>,
     venues: Arc<OnceCell<Vec<VenueSummary>>>,
     email: Option<String>,
-    tool_router: ToolRouter<Self>,
 }
 
 pub async fn serve() -> Result<()> {
@@ -55,7 +54,6 @@ pub async fn serve() -> Result<()> {
         email: std::env::var("SPOONS_EMAIL")
             .ok()
             .filter(|email| !email.is_empty()),
-        tool_router: Spoons::tool_router(),
     };
     server
         .serve(rmcp::transport::stdio())
