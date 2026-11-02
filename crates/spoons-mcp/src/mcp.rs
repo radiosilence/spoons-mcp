@@ -27,6 +27,7 @@ const MAX_QUANTITY: u32 = 10;
 const MAX_WAIT: u64 = 55;
 const POLL: Duration = Duration::from_secs(5);
 const MAX_MENU_RESULTS: usize = 50;
+const PAYMENT_PAGE: &str = "https://paymentpage.axepta.bnpparibas/";
 
 #[derive(Clone)]
 pub struct Spoons {
@@ -105,10 +106,6 @@ pub struct PayRequest {
     /// The user has said they want this order although a matching one went to the same table recently.
     #[serde(default)]
     confirm_duplicate: bool,
-    /// Prepare a payment again after an earlier attempt got no clear answer. Only when the user has checked that no
-    /// order went through (no receipt email, no charge).
-    #[serde(default)]
-    force: bool,
     /// Open the payment page in the browser again.
     #[serde(default)]
     reopen: bool,
@@ -154,7 +151,7 @@ fn explain(status: &PaymentStatus) -> &'static str {
         }
         PaymentStatus::Paid => "Paid for, and being sent to the pub. Call order_status again.",
         PaymentStatus::Duplicate => {
-            "Paid for, but held as a repeat of a recent order to this table. Ask the user whether to send it anyway \
+            "Held back as a repeat of a recent order to this table. Ask the user whether to send it anyway \
              (send_duplicate) or cancel it (cancel_order)."
         }
         PaymentStatus::Cancelled => "Cancelled. Quote again to order.",
@@ -175,8 +172,10 @@ fn status_report(order: &Order, status: &PaymentStatus) -> Value {
     })
 }
 
+/// Only the payment page is opened: the url comes from a remote API, and `open` would hand anything else, such as a
+/// file or an app, to the system.
 fn open_in_browser(url: &str) -> bool {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_os = "macos") || !url.starts_with(PAYMENT_PAGE) {
         return false;
     }
     std::process::Command::new("open")
@@ -267,13 +266,23 @@ impl Spoons {
             .ok_or_else(|| "this pub has no menus to order from".to_owned())
     }
 
+    /// Holds a quote for this call, or says another call has it, rather than waiting: the other may be a payment
+    /// waiting up to a minute on the payment API.
+    fn hold(&self, quote_id: &str) -> Result<std::fs::File, String> {
+        self.store.try_lock(quote_id).map_err(fail)?.ok_or_else(|| {
+            "another call is working on this quote; call order_status to see where it has got to".to_owned()
+        })
+    }
+
     /// Hands out the payment page once a payment is prepared and pending, unless it needs the user's say-so first.
+    /// `retried` says an earlier attempt for this quote got no clear answer.
     fn hand_out(
         &self,
         order: &mut Order,
         confirm_duplicate: bool,
         reopen: bool,
-    ) -> Result<String, String> {
+        retried: bool,
+    ) -> String {
         let Payment::Prepared {
             url,
             duplicate_order,
@@ -281,14 +290,19 @@ impl Spoons {
             ..
         } = &mut order.payment
         else {
-            return Err("this quote has no payment prepared".to_owned());
+            unreachable!("handed out a quote with no payment prepared");
         };
         if *duplicate_order && !confirm_duplicate {
-            return Ok(text(json!({
-                "quote_id": order.quote_id,
-                "question": "A matching order went to this table recently. Ask the user whether they want another. \
-                             If yes, call pay again with confirm_duplicate; if no, call cancel_order.",
-            })));
+            let question = if retried {
+                "The payment API says a matching order went to this table recently. That is most likely this \
+                 quote's earlier attempt, which got no clear answer and can't be paid. Ask the user only whether \
+                 they ordered the same thing elsewhere in the last few minutes; if not, call pay again with \
+                 confirm_duplicate. If they did, call cancel_order."
+            } else {
+                "A matching order went to this table recently. Ask the user whether they want another. If yes, \
+                 call pay again with confirm_duplicate; if no, call cancel_order."
+            };
+            return text(json!({ "quote_id": order.quote_id, "question": question }));
         }
         let opened = if !*url_opened || reopen {
             let opened = open_in_browser(url);
@@ -298,8 +312,12 @@ impl Spoons {
             false
         };
         let url = url.clone();
-        self.store.save(order).map_err(fail)?;
-        Ok(text(json!({
+        // Only records that the page was opened. Failing here must not report a failure while the page is open in
+        // front of the user.
+        if let Err(error) = self.store.save(order) {
+            tracing::warn!(%error, quote_id = order.quote_id, "couldn't record that the payment page was opened");
+        }
+        text(json!({
             "quote_id": order.quote_id,
             "pub": order.venue_name,
             "table": order.table,
@@ -313,7 +331,7 @@ impl Spoons {
                 "Give the user the payment page link. Once they have entered their card and approved it in their \
                  banking app, call order_status with wait_secs."
             },
-        })))
+        }))
     }
 }
 
@@ -509,17 +527,14 @@ impl Spoons {
     /// approves it in their banking app. Safe to call again: it never starts a second payment for the same quote.
     #[tool(annotations(destructive_hint = true, idempotent_hint = true))]
     async fn pay(&self, Parameters(request): Parameters<PayRequest>) -> Result<String, String> {
-        let _lock = self.store.lock(&request.quote_id).map_err(fail)?;
+        let _lock = self.hold(&request.quote_id)?;
         let mut order = self.store.load(&request.quote_id).map_err(fail)?;
-        match &order.payment {
+        // A payment whose request got no clear answer may exist, but its payment page only ever came back in that
+        // answer, so nobody can pay it and it lapses. Preparing again is safe; the payment API flags the repeat.
+        let retried = match &order.payment {
             Payment::Cancelled => return Err("this quote was cancelled; quote again".to_owned()),
-            Payment::Preparing | Payment::Unconfirmed { .. } if !request.force => {
-                return Err(
-                    "an earlier attempt to pay got no clear answer, so an order may exist. Ask the user to check for \
-                     a receipt email or a charge; only if there is none, call pay with force."
-                        .to_owned(),
-                );
-            }
+            Payment::None => false,
+            Payment::Preparing | Payment::Unconfirmed { .. } => true,
             Payment::Prepared { transaction_id, .. } => {
                 let status = self
                     .payments
@@ -527,19 +542,24 @@ impl Spoons {
                     .await
                     .map_err(fail)?;
                 return match status {
-                    PaymentStatus::Pending => {
-                        self.hand_out(&mut order, request.confirm_duplicate, request.reopen)
-                    }
+                    PaymentStatus::Pending => Ok(self.hand_out(
+                        &mut order,
+                        request.confirm_duplicate,
+                        request.reopen,
+                        false,
+                    )),
                     PaymentStatus::Cancelled => {
                         order.payment = Payment::Cancelled;
                         self.store.save(&order).map_err(fail)?;
-                        Err("the payment page lapsed or was backed out of, which cancelled it; quote again".to_owned())
+                        Err(
+                            "the payment page lapsed or was backed out of, which cancelled it; quote again"
+                                .to_owned(),
+                        )
                     }
                     other => Ok(text(status_report(&order, &other))),
                 };
             }
-            _ => {}
-        }
+        };
 
         let email = self.email.as_deref().ok_or(
             "set SPOONS_EMAIL in this server's environment to the address the receipt should go to",
@@ -562,24 +582,47 @@ impl Spoons {
             .await;
         match prepared {
             Ok(prepared) => {
+                let transaction_id = prepared.transaction_id.clone();
                 order.payment = Payment::Prepared {
                     transaction_id: prepared.transaction_id,
                     url: prepared.url,
                     duplicate_order: prepared.duplicate_order,
                     url_opened: false,
+                    resubmitted: false,
                 };
-                self.store.save(&order).map_err(fail)?;
-                self.hand_out(&mut order, request.confirm_duplicate, false)
+                if let Err(error) = self.store.save(&order) {
+                    // Nobody has the payment page yet, so cancelling is safe, and a payment that isn't recorded
+                    // couldn't be checked on or cancelled later.
+                    tracing::error!(%error, transaction_id, "couldn't record a prepared payment; cancelling it");
+                    let cancelled = self
+                        .payments
+                        .cancel(&order.franchise, order.venue_ref, &transaction_id)
+                        .await;
+                    return Err(format!(
+                        "couldn't record the payment ({error}); cancelling transaction {transaction_id} {}",
+                        match cancelled {
+                            Ok(()) => "worked, so pay can be tried again".to_owned(),
+                            Err(error) =>
+                                format!("failed ({error}); it lapses by itself if nobody pays it"),
+                        }
+                    ));
+                }
+                Ok(self.hand_out(&mut order, request.confirm_duplicate, false, retried))
             }
             Err(Error::Unconfirmed { detail, .. }) => {
-                order.payment = Payment::Unconfirmed {
-                    detail: detail.clone(),
-                };
+                // The detail can hold the payment page, which must not reach anyone: see above.
+                tracing::warn!(
+                    detail,
+                    quote_id = order.quote_id,
+                    "no clear answer preparing a payment"
+                );
+                order.payment = Payment::Unconfirmed { detail };
                 self.store.save(&order).map_err(fail)?;
-                Err(format!(
-                    "the payment API gave no clear answer ({detail}), so an order may exist. Don't pay again: ask the \
-                     user to check for a receipt email or a charge."
-                ))
+                Err(
+                    "the payment API gave no clear answer. Nobody can pay a payment started that way, so it's safe \
+                     to call pay again."
+                        .to_owned(),
+                )
             }
             Err(error) => {
                 order.payment = Payment::None;
@@ -627,23 +670,14 @@ impl Spoons {
         &self,
         Parameters(request): Parameters<QuoteId>,
     ) -> Result<String, String> {
-        let _lock = self.store.lock(&request.quote_id).map_err(fail)?;
+        let _lock = self.hold(&request.quote_id)?;
         let mut order = self.store.load(&request.quote_id).map_err(fail)?;
-        match &order.payment {
-            Payment::None | Payment::Cancelled => {}
-            Payment::Preparing | Payment::Unconfirmed { .. } => {
-                return Err(
-                    "an earlier attempt to pay got no clear answer, so there is no payment to cancel by id. If a \
-                     receipt email arrives, the order went through."
-                        .to_owned(),
-                );
-            }
-            Payment::Prepared { transaction_id, .. } => {
-                self.payments
-                    .cancel(&order.franchise, order.venue_ref, transaction_id)
-                    .await
-                    .map_err(fail)?;
-            }
+        // A payment started without a clear answer has no payment page anyone holds, so it lapses by itself.
+        if let Payment::Prepared { transaction_id, .. } = &order.payment {
+            self.payments
+                .cancel(&order.franchise, order.venue_ref, transaction_id)
+                .await
+                .map_err(fail)?;
         }
         order.payment = Payment::Cancelled;
         self.store.save(&order).map_err(fail)?;
@@ -653,32 +687,60 @@ impl Spoons {
     }
 
     /// Sends an order held as a repeat of a recent one to the pub anyway. Only when the user has said they want it.
+    /// Sends it at most once.
     #[tool(annotations(destructive_hint = true, idempotent_hint = false))]
     async fn send_duplicate(
         &self,
         Parameters(request): Parameters<QuoteId>,
     ) -> Result<String, String> {
-        let _lock = self.store.lock(&request.quote_id).map_err(fail)?;
-        let order = self.store.load(&request.quote_id).map_err(fail)?;
-        let Payment::Prepared { transaction_id, .. } = &order.payment else {
+        let _lock = self.hold(&request.quote_id)?;
+        let mut order = self.store.load(&request.quote_id).map_err(fail)?;
+        let Payment::Prepared {
+            transaction_id,
+            resubmitted,
+            ..
+        } = &mut order.payment
+        else {
             return Err("this quote has no payment to send".to_owned());
         };
+        if *resubmitted {
+            return Err(
+                "this order has already been sent once; call order_status to see where it has got to".to_owned(),
+            );
+        }
+        // Recorded before sending, like a prepare: right after sending, the status can still read as a duplicate,
+        // and a second send would order it twice.
+        *resubmitted = true;
+        let transaction_id = transaction_id.clone();
+        self.store.save(&order).map_err(fail)?;
         match self
             .payments
-            .resubmit(&order.franchise, order.venue_ref, transaction_id)
+            .resubmit(&order.franchise, order.venue_ref, &transaction_id)
             .await
         {
             Ok(()) => {}
             Err(Error::Unconfirmed { detail, .. }) => {
-                return Err(format!(
-                    "no clear answer ({detail}), so it may have been sent. Call order_status rather than sending again."
-                ));
+                tracing::warn!(
+                    detail,
+                    quote_id = order.quote_id,
+                    "no clear answer sending a duplicate"
+                );
+                return Err(
+                    "no clear answer, so it may have been sent. Call order_status rather than sending again."
+                        .to_owned(),
+                );
             }
-            Err(error) => return Err(fail(error)),
+            Err(error) => {
+                if let Payment::Prepared { resubmitted, .. } = &mut order.payment {
+                    *resubmitted = false;
+                }
+                self.store.save(&order).map_err(fail)?;
+                return Err(fail(error));
+            }
         }
         let status = self
             .payments
-            .status(&order.franchise, order.venue_ref, transaction_id)
+            .status(&order.franchise, order.venue_ref, &transaction_id)
             .await
             .map_err(fail)?;
         Ok(text(status_report(&order, &status)))
@@ -690,7 +752,7 @@ impl Spoons {
     instructions = "Orders food and drink to a table at a Wetherspoon's pub. Find the pub (find_pubs), look up \
                     products (menu), price the basket (quote) and show the user the lines and total, then pay once \
                     they agree. pay opens the payment page; the user enters their card and approves it in their \
-                    banking app; follow with order_status. Never call pay with force, send_duplicate or \
+                    banking app; follow with order_status. Never call send_duplicate or pay with \
                     confirm_duplicate without the user's say-so."
 )]
 impl ServerHandler for Spoons {}

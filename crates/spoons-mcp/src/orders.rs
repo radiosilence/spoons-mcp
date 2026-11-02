@@ -1,8 +1,8 @@
 //! Quotes and their payments, kept on disk so they survive the server restarting and are shared by every server
 //! process: cancelling a payment needs the device id that started it, and a payment must never be prepared twice.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Write};
+use std::fs::{self, File, OpenOptions, TryLockError};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -56,6 +56,9 @@ pub enum Payment {
         url: String,
         duplicate_order: bool,
         url_opened: bool,
+        /// A held duplicate has been sent anyway, or a send is under way.
+        #[serde(default)]
+        resubmitted: bool,
     },
     Cancelled,
 }
@@ -83,24 +86,27 @@ impl Store {
         Ok(Self { dir })
     }
 
-    /// The id this install gives the payment API, made once.
+    /// The id this install gives the payment API, made once. Written in full before it appears, so a process
+    /// starting at the same moment never reads half of it.
     pub fn device_id(&self) -> Result<String> {
         let path = self.dir.join("device-id");
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                let id = uuid::Uuid::new_v4().to_string();
-                file.write_all(id.as_bytes())?;
-                Ok(id)
+        if !path.exists() {
+            let partial = self
+                .dir
+                .join(format!("device-id.{}", uuid::Uuid::new_v4().simple()));
+            fs::write(&partial, uuid::Uuid::new_v4().to_string())?;
+            let linked = fs::hard_link(&partial, &path);
+            fs::remove_file(&partial).ok();
+            match linked {
+                Err(error) if error.kind() != ErrorKind::AlreadyExists => return Err(error.into()),
+                _ => {}
             }
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                let id = fs::read_to_string(&path)?.trim().to_owned();
-                if id.is_empty() {
-                    bail!("{} is empty; remove it to make a new one", path.display());
-                }
-                Ok(id)
-            }
-            Err(error) => Err(error.into()),
         }
+        let id = fs::read_to_string(&path)?.trim().to_owned();
+        if id.is_empty() {
+            bail!("{} is empty", path.display());
+        }
+        Ok(id)
     }
 
     fn path(&self, quote_id: &str) -> Result<PathBuf> {
@@ -110,17 +116,21 @@ impl Store {
         Ok(self.dir.join("orders").join(format!("{quote_id}.json")))
     }
 
-    /// Holds a quote for one caller at a time, across processes, until the returned file is dropped. The lock is on
-    /// a file of its own, since saving replaces the order's file.
-    pub fn lock(&self, quote_id: &str) -> Result<File> {
+    /// Holds a quote for one caller at a time, across processes, until the returned file is dropped; `None` when
+    /// another caller has it. The lock is on a file of its own, since saving replaces the order's file, and lock
+    /// files are never removed, so two callers can't each lock a different one.
+    pub fn try_lock(&self, quote_id: &str) -> Result<Option<File>> {
         let path = self.path(quote_id)?.with_extension("lock");
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
             .open(&path)?;
-        file.lock()?;
-        Ok(file)
+        match file.try_lock() {
+            Ok(()) => Ok(Some(file)),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(error)) => Err(error.into()),
+        }
     }
 
     pub fn load(&self, quote_id: &str) -> Result<Order> {
@@ -151,14 +161,15 @@ impl Store {
             let Some(quote_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 continue;
             };
-            let _lock = self.lock(quote_id)?;
+            let Some(_lock) = self.try_lock(quote_id)? else {
+                continue;
+            };
             let Ok(order) = self.load(quote_id) else {
                 continue;
             };
             let old = now().saturating_sub(order.created_at) > KEEP.as_secs();
             if old && matches!(order.payment, Payment::None | Payment::Cancelled) {
                 fs::remove_file(&path)?;
-                fs::remove_file(path.with_extension("lock")).ok();
             }
         }
         Ok(())
@@ -200,6 +211,17 @@ mod tests {
     }
 
     #[test]
+    fn lets_one_caller_hold_a_quote_at_a_time() {
+        let (store, dir) = store();
+        let held = store.try_lock("abc123").unwrap();
+        assert!(held.is_some());
+        assert!(store.try_lock("abc123").unwrap().is_none());
+        drop(held);
+        assert!(store.try_lock("abc123").unwrap().is_some());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn saves_and_loads_an_order() {
         let (store, dir) = store();
         let prepared = Payment::Prepared {
@@ -207,6 +229,7 @@ mod tests {
             url: "https://paymentpage.axepta.bnpparibas/payssl.aspx".into(),
             duplicate_order: false,
             url_opened: true,
+            resubmitted: false,
         };
         store.save(&order("abc123", now(), prepared)).unwrap();
         let loaded = store.load("abc123").unwrap();
@@ -224,7 +247,7 @@ mod tests {
     fn refuses_quote_ids_that_are_paths() {
         let (store, dir) = store();
         assert!(store.load("../device-id").is_err());
-        assert!(store.lock("").is_err());
+        assert!(store.try_lock("").is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 
