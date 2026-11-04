@@ -15,7 +15,7 @@ use tokio::time::sleep;
 
 use crate::client::{APP, Error, USER_AGENT};
 
-pub(crate) const DEFAULT_BASE: &str = "https://api.jdwpayments.net/api/0.1";
+pub(crate) const DEFAULT_BASE: &str = "https://api.jdwpayments.net/api/2.0";
 
 #[derive(Clone)]
 pub struct Payments {
@@ -146,6 +146,7 @@ impl Payments {
             "currency": order.currency,
             "amount": order.amount,
             "description": "",
+            "language": "en",
             "user_email": order.email,
             "token": order.token,
             "callback_url": callback,
