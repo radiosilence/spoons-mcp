@@ -41,7 +41,15 @@ enum Command {
         data: PathBuf,
     },
     /// Serve the MCP tools for finding a pub, reading its menu and ordering to a table, over stdio.
-    Mcp,
+    Mcp {
+        /// Serve over streamable HTTP at `/mcp` on this address instead, such as `0.0.0.0:8080`. Each request's
+        /// `X-Spoons-Email` header says where its receipt goes; `SPOONS_EMAIL` is ignored. Only behind a proxy that authenticates callers.
+        #[arg(long)]
+        http: Option<String>,
+        /// Where quotes and payments are kept; `$XDG_STATE_HOME/spoons` when not given.
+        #[arg(long)]
+        state: Option<PathBuf>,
+    },
     /// Rank every pub by what a round of staples costs there, into tiers.md and tiers.json.
     Tiers {
         #[arg(long, default_value = "data")]
@@ -80,6 +88,6 @@ async fn main() -> Result<()> {
         }
         Command::Prices { data } => prices::build(&data),
         Command::Tiers { data } => tiers::build(&data),
-        Command::Mcp => mcp::serve().await,
+        Command::Mcp { http, state } => mcp::serve(http.as_deref(), state).await,
     }
 }

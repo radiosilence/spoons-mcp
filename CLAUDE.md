@@ -1,6 +1,6 @@
 # spoons-mcp
 
-Client and command-line tool for the unofficial API behind Wetherspoon's order-and-pay app. `spoons-api-client` speaks the API; the `spoons` binary (crate `spoons-mcp`) dumps pubs and menus into `data/`, extracts prices and ranks pubs into tiers by what a round costs. The README explains the API's quirks. The only thing published is the `spoons` binary, attached to GitHub releases; there are no crates.io packages or images.
+Client and command-line tool for the unofficial API behind Wetherspoon's order-and-pay app. `spoons-api-client` speaks the API; the `spoons` binary (crate `spoons-mcp`) dumps pubs and menus into `data/`, extracts prices and ranks pubs into tiers by what a round costs. The README explains the API's quirks. Releases publish the `spoons` binary, attached to GitHub releases, and the container image `ghcr.io/radiosilence/spoons-mcp` (the MCP server over HTTP, which jaritanet runs behind mcp-gateway); there are no crates.io packages.
 
 ## Git
 
@@ -14,7 +14,7 @@ Client and command-line tool for the unofficial API behind Wetherspoon's order-a
 
 ## Releasing
 
-`just release patch|minor|major` (or an exact `X.Y.Z`, or the Release workflow in Actions) opens a `release-vX.Y.Z` PR that bumps the workspace version in `Cargo.toml` and `Cargo.lock` and turns the unreleased fragments into that version. Merging it is the release: CD sees the version change, builds the binaries and creates the tag and GitHub release with the changelog section as notes. Never tag by hand. A failed release is retried by running CI/CD manually on main. Both workflows need the `RELEASE_TOKEN` secret, since a PR or release made with the workflow token starts no workflows.
+`just release patch|minor|major` (or an exact `X.Y.Z`, or the Release workflow in Actions) opens a `release-vX.Y.Z` PR that bumps the workspace version in `Cargo.toml` and `Cargo.lock` and turns the unreleased fragments into that version. Merging it is the release: CD sees the version change, builds the binaries and the image, tags the image `vX.Y.Z` and `latest`, and then creates the tag and GitHub release with the changelog section as notes. The GitHub release comes last because jaritanet's updater takes it as proof the image exists. Never tag by hand. A failed release is retried by running CI/CD manually on main. Both workflows need the `RELEASE_TOKEN` secret, since a PR or release made with the workflow token starts no workflows.
 
 ## Check
 

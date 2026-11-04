@@ -1,0 +1,1 @@
+- **`spoons mcp --http` and a container image.** The MCP server runs over streamable HTTP behind a gateway, taking each user's receipt address from the `X-Spoons-Email` header, and releases publish `ghcr.io/radiosilence/spoons-mcp`.

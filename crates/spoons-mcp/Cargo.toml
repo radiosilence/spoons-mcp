@@ -13,9 +13,11 @@ path = "src/main.rs"
 [dependencies]
 spoons-api-client = { path = "../spoons-api-client" }
 anyhow.workspace = true
+axum = "0.8"
 clap = { version = "4.6.7", features = ["derive"] }
 flate2.workspace = true
 futures-util.workspace = true
+http = "1"
 rmcp.workspace = true
 schemars.workspace = true
 serde.workspace = true
