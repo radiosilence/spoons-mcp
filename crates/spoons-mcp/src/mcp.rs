@@ -5,11 +5,14 @@
 //! request that could place an order, and nothing cancels an order on its own: cancelling while the bank is
 //! authorising a card can leave a charge with no order.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::RoleServer;
+use rmcp::service::RequestContext;
 use rmcp::{ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -28,6 +31,8 @@ const MAX_WAIT: u64 = 55;
 const POLL: Duration = Duration::from_secs(5);
 const MAX_MENU_RESULTS: usize = 50;
 const PAYMENT_PAGE: &str = "https://paymentpage.axepta.bnpparibas/";
+/// Over HTTP, where the receipt goes, per request: the gateway in front injects each user's own.
+const EMAIL_HEADER: &str = "x-spoons-email";
 
 #[derive(Clone)]
 pub struct Spoons {
@@ -38,8 +43,11 @@ pub struct Spoons {
     email: Option<String>,
 }
 
-pub async fn serve() -> Result<()> {
-    let store = Store::open()?;
+pub async fn serve(http: Option<&str>, state: Option<PathBuf>) -> Result<()> {
+    let store = match state {
+        Some(dir) => Store::at(dir)?,
+        None => Store::open()?,
+    };
     if let Err(error) = store.prune() {
         tracing::warn!(%error, "couldn't prune old quotes");
     }
@@ -56,11 +64,32 @@ pub async fn serve() -> Result<()> {
             .ok()
             .filter(|email| !email.is_empty()),
     };
-    server
-        .serve(rmcp::transport::stdio())
-        .await?
-        .waiting()
-        .await?;
+    match http {
+        None => {
+            server
+                .serve(rmcp::transport::stdio())
+                .await?
+                .waiting()
+                .await?;
+        }
+        Some(addr) => {
+            use rmcp::transport::streamable_http_server::{
+                StreamableHttpServerConfig, StreamableHttpService,
+                session::local::LocalSessionManager,
+            };
+            // The Host allowlist guards a browser reaching a server on localhost; behind a proxy it only rejects
+            // the internal Host the proxy forwards.
+            let service = StreamableHttpService::new(
+                move || Ok(server.clone()),
+                Arc::new(LocalSessionManager::default()),
+                StreamableHttpServerConfig::default().disable_allowed_hosts(),
+            );
+            let router = axum::Router::new().nest_service("/mcp", service);
+            let listener = tokio::net::TcpListener::bind(addr).await?;
+            tracing::info!("MCP over streamable HTTP on http://{addr}/mcp");
+            axum::serve(listener, router).await?;
+        }
+    }
     Ok(())
 }
 
@@ -185,6 +214,18 @@ fn open_in_browser(url: &str) -> bool {
 }
 
 impl Spoons {
+    /// Where this request's receipt goes: its `X-Spoons-Email` header over HTTP, or `SPOONS_EMAIL`.
+    fn email(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {
+        ctx.extensions
+            .get::<http::request::Parts>()
+            .and_then(|parts| parts.headers.get(EMAIL_HEADER))
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|email| !email.is_empty())
+            .map(str::to_owned)
+            .or_else(|| self.email.clone())
+    }
+
     async fn venues(&self) -> Result<&[VenueSummary], String> {
         self.venues
             .get_or_try_init(|| self.client.venues())
@@ -526,7 +567,11 @@ impl Spoons {
     /// Starts paying for a quote and opens the payment page in the browser, where the user enters their card and
     /// approves it in their banking app. Safe to call again: it never starts a second payment for the same quote.
     #[tool(annotations(destructive_hint = true, idempotent_hint = true))]
-    async fn pay(&self, Parameters(request): Parameters<PayRequest>) -> Result<String, String> {
+    async fn pay(
+        &self,
+        ctx: RequestContext<RoleServer>,
+        Parameters(request): Parameters<PayRequest>,
+    ) -> Result<String, String> {
         let _lock = self.hold(&request.quote_id)?;
         let mut order = self.store.load(&request.quote_id).map_err(fail)?;
         // A payment whose request got no clear answer may exist, but its payment page only ever came back in that
@@ -561,8 +606,8 @@ impl Spoons {
             }
         };
 
-        let email = self.email.as_deref().ok_or(
-            "set SPOONS_EMAIL in this server's environment to the address the receipt should go to",
+        let email = self.email(&ctx).ok_or(
+            "no receipt address: set SPOONS_EMAIL in this server's environment, or send X-Spoons-Email over HTTP",
         )?;
         order.payment = Payment::Preparing;
         self.store.save(&order).map_err(fail)?;
@@ -575,7 +620,7 @@ impl Spoons {
                     table: order.table,
                     currency: &order.currency,
                     amount: order.total,
-                    email,
+                    email: &email,
                     token: &order.token,
                 },
             )

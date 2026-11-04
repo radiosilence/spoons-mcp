@@ -10,7 +10,8 @@ payments go through a second API, `api.jdwpayments.net`, which takes no token.
 ## Install
 
 Each [GitHub release](https://github.com/radiosilence/spoons-mcp/releases) carries the `spoons` binary for Linux
-(static, x86_64 and arm64) and Apple silicon macOS. From a checkout, `cargo install --path crates/spoons-mcp`.
+(static, x86_64 and arm64) and Apple silicon macOS. From a checkout, `cargo install --path crates/spoons-mcp`. The
+image `ghcr.io/radiosilence/spoons-mcp` runs the MCP server over HTTP.
 
 ## Dump
 
@@ -47,7 +48,13 @@ being the cheapest tenth and F the dearest twentieth; pubs charging the same sha
 $ claude mcp add spoons --env SPOONS_EMAIL=you@example.com -- spoons mcp
 ```
 
-`SPOONS_EMAIL` is where the receipt goes. Ordering is two steps so the user sees the price before anything starts:
+`SPOONS_EMAIL` is where the receipt goes.
+
+`spoons mcp --http 0.0.0.0:8080` serves the same tools over streamable HTTP at `/mcp`, which is how the image runs.
+Each request's `X-Spoons-Email` header gives its receipt address, so a gateway in front can inject each user's own,
+and `pay` returns the payment page as a link instead of opening it. The server authenticates nobody, so it belongs
+behind a proxy that does. `--state` says where quotes are kept; the image keeps them in the container, where losing
+them is safe: a quote that no longer exists can't be paid, and a payment nobody pays lapses. Ordering is two steps so the user sees the price before anything starts:
 `quote` prices the basket at the pub's till and changes nothing, and `pay` prepares the card payment and opens the
 payment page (BNP Paribas Axepta) in the browser, where the card is entered and the bank approves it. The tools never
 take card details.

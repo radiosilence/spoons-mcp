@@ -1,7 +1,8 @@
 name: CI/CD
 
 # CD runs after `Checks` has passed on main: a push that changes the version
-# publishes the GitHub release, with the binaries from `build` attached.
+# tags the container image with it and publishes the GitHub release, with the
+# binaries from `build` attached.
 #
 # Every job ends in `Checks`, the one status a ruleset should require. Each
 # job runs only for the domains the change touches (see `changes`); a skipped
@@ -20,6 +21,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  IMAGE: ghcr.io/radiosilence/spoons-mcp
 
 # A pull request's newer push cancels its older run; on main, a newer push
 # cancels an older one that releases nothing. A run that may release is in a
@@ -136,8 +138,9 @@ jobs:
             # The release binaries. The Rust jobs already check the code, so
             # these build outside a release only when the lockfile or the
             # recipe changed, since the musl build compiles C dependencies
-            # (aws-lc-sys) the tests' glibc build does not.
-            touches '^Cargo\.lock$|^\.github/' || build=false
+            # (aws-lc-sys) the tests' glibc build does not. The image is built
+            # from those binaries, so its Dockerfile belongs here too.
+            touches '^Cargo\.lock$|^Dockerfile$|^\.github/' || build=false
           fi
           {
             echo "rust=$rust"
@@ -302,13 +305,60 @@ jobs:
           # Long enough to re-run a failed release weeks later.
           retention-days: ${{ needs.changes.outputs.release == 'true' && 90 || 7 }}
 
+  # The Linux binaries above in the image, for both architectures. A pull
+  # request builds it to prove it builds. A release run on main also pushes
+  # it under the commit, which nothing deploys; CD moves the version tags and
+  # `latest` onto it only once `Checks` has passed. The Dockerfile only copies
+  # files, so there is no emulation and no layer cache.
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [changes, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.release == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: spoons-linux-*
+      - run: |
+          mkdir -p dist/amd64 dist/arm64 dist/state
+          tar -xzf spoons-linux-amd64/spoons-linux-amd64.tar.gz -C dist/amd64
+          tar -xzf spoons-linux-arm64/spoons-linux-arm64.tar.gz -C dist/arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: env.PUSH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          # The build record would be uploaded as an artifact of this run,
+          # beside the binaries a release attaches.
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: dist
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+
   # The one status a ruleset should require. Skipped jobs are domains the
   # change does not touch and pass; anything failed or cancelled fails it.
   checks:
     name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, actionlint, test, lint, format, audit, changelog, build]
+    needs: [changes, actionlint, test, lint, format, audit, changelog, build, container]
     if: always()
     steps:
       - env:
@@ -323,6 +373,30 @@ jobs:
 
   # ── CD ──────────────────────────────────────────────────────────────────
 
+  # The release's version and `latest` onto the image `container` pushed,
+  # once `Checks` has passed. Before the GitHub release, since jaritanet pins
+  # `vX.Y.Z` as soon as the release exists. Retagging needs no rebuild and
+  # repeats safely.
+  image-release:
+    name: Container image (release tags)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [changes, checks, container]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.release == 'true' && needs.checks.result == 'success' && needs.container.result == 'success' }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.changes.outputs.version }}
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker buildx imagetools create -t "$IMAGE:v$VERSION" -t "$IMAGE:latest" "$IMAGE:$GITHUB_SHA"
+
   # Main only, after `Checks`. Creates the tag through the API, on the commit
   # that was built; the notes are the version's section of CHANGELOG.md, and
   # the downloads are the tarballs from `build`.
@@ -330,10 +404,10 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [changes, checks, build]
+    needs: [changes, checks, build, image-release]
     # Every need having run, not merely not failed: a release without its
-    # binaries is not a release.
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.release == 'true' && needs.checks.result == 'success' && needs.build.result == 'success' }}
+    # binaries or its image is not a release.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.changes.outputs.release == 'true' && needs.checks.result == 'success' && needs.build.result == 'success' && needs.image-release.result == 'success' }}
     permissions:
       contents: write
     env:
