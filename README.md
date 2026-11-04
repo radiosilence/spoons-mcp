@@ -51,7 +51,8 @@ $ claude mcp add spoons --env SPOONS_EMAIL=you@example.com -- spoons mcp
 `SPOONS_EMAIL` is where the receipt goes.
 
 `spoons mcp --http 0.0.0.0:8080` serves the same tools over streamable HTTP at `/mcp`, which is how the image runs.
-Each request's `X-Spoons-Email` header gives its receipt address, so a gateway in front can inject each user's own,
+Each request's `X-Spoons-Email` header gives its receipt address, and `SPOONS_EMAIL` is ignored: the server is
+shared, so a gateway in front injects each user's own,
 and `pay` returns the payment page as a link instead of opening it. The server authenticates nobody, so it belongs
 behind a proxy that does. `--state` says where quotes are kept; the image keeps them in the container, where losing
 them is safe: a quote that no longer exists can't be paid, and a payment nobody pays lapses. Ordering is two steps so the user sees the price before anything starts:

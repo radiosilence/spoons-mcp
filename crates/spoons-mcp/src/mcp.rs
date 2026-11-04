@@ -214,16 +214,22 @@ fn open_in_browser(url: &str) -> bool {
 }
 
 impl Spoons {
-    /// Where this request's receipt goes: its `X-Spoons-Email` header over HTTP, or `SPOONS_EMAIL`.
+    /// Where this request's receipt goes. Over HTTP only its `X-Spoons-Email` header counts, since the server is
+    /// shared and the gateway in front injects each user's own; over stdio, `SPOONS_EMAIL`.
     fn email(&self, ctx: &RequestContext<RoleServer>) -> Option<String> {
-        ctx.extensions
-            .get::<http::request::Parts>()
-            .and_then(|parts| parts.headers.get(EMAIL_HEADER))
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim)
-            .filter(|email| !email.is_empty())
-            .map(str::to_owned)
-            .or_else(|| self.email.clone())
+        let header = |parts: &http::request::Parts| {
+            parts
+                .headers
+                .get(EMAIL_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|email| !email.is_empty())
+                .map(str::to_owned)
+        };
+        match ctx.extensions.get::<http::request::Parts>() {
+            Some(parts) => header(parts),
+            None => self.email.clone(),
+        }
     }
 
     async fn venues(&self) -> Result<&[VenueSummary], String> {
@@ -607,7 +613,7 @@ impl Spoons {
         };
 
         let email = self.email(&ctx).ok_or(
-            "no receipt address: set SPOONS_EMAIL in this server's environment, or send X-Spoons-Email over HTTP",
+            "no receipt address: send X-Spoons-Email over HTTP, or set SPOONS_EMAIL for stdio",
         )?;
         order.payment = Payment::Preparing;
         self.store.save(&order).map_err(fail)?;

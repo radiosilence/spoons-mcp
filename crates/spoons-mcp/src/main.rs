@@ -43,7 +43,7 @@ enum Command {
     /// Serve the MCP tools for finding a pub, reading its menu and ordering to a table, over stdio.
     Mcp {
         /// Serve over streamable HTTP at `/mcp` on this address instead, such as `0.0.0.0:8080`. Each request's
-        /// `X-Spoons-Email` header says where its receipt goes. Only behind a proxy that authenticates callers.
+        /// `X-Spoons-Email` header says where its receipt goes; `SPOONS_EMAIL` is ignored. Only behind a proxy that authenticates callers.
         #[arg(long)]
         http: Option<String>,
         /// Where quotes and payments are kept; `$XDG_STATE_HOME/spoons` when not given.
