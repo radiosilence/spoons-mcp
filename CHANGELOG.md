@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+### Added
+
+- **Ordering API in the client.** Tables, basket validation and the payment API (prepare a card payment, read its status, cancel it), with basket lines built from menu products. Payment requests that could place an order are never retried.
+- **`spoons mcp`.** An MCP server for ordering to a table: find a pub, read its menu, quote a basket, pay through the card payment page and follow the order. Payments are never prepared twice for a quote or retried, and nothing cancels while a card may be being authorised.
+- **`spoons mcp --http` and a container image.** The MCP server runs over streamable HTTP behind a gateway, taking each user's receipt address from the `X-Spoons-Email` header, and releases publish `ghcr.io/radiosilence/spoons-mcp`.
+
+### Fixed
+
+- **Payments at version 2.0 of the payment API.** The web app moved to it, and preparing a payment at the old routes answered 404. The client now reads the version from the app's bundle as the app does.
+
+### Internal
+
+- **Builds use the latest stable Rust.** mise installs `rust` at `latest`.
+
 ## 0.1.1
 
 ### Added
