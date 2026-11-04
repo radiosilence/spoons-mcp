@@ -16,8 +16,11 @@ anyhow.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 flate2.workspace = true
 futures-util.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid = { version = "1", features = ["v4"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

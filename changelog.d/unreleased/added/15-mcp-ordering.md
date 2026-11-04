@@ -1,0 +1,1 @@
+- **`spoons mcp`.** An MCP server for ordering to a table: find a pub, read its menu, quote a basket, pay through the card payment page and follow the order. Payments are never prepared twice for a quote or retried, and nothing cancels while a card may be being authorised.

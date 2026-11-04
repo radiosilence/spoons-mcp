@@ -22,8 +22,18 @@ pub enum LineError {
 }
 
 /// One product in a basket, in one size.
-#[derive(Debug, Clone, Serialize)]
-pub struct BasketLine(Value);
+#[derive(Debug, Clone)]
+pub struct BasketLine {
+    body: Value,
+    /// The size chosen, as the menu labels it.
+    pub portion: String,
+}
+
+impl Serialize for BasketLine {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.body.serialize(serializer)
+    }
+}
 
 impl BasketLine {
     /// `category` is the id of the menu category the product was listed under; `portion` is a size's label, such as
@@ -81,24 +91,27 @@ impl BasketLine {
         };
         checkout.insert("displayRecordId".into(), json!(product.display_record_id));
 
-        Ok(Self(json!({
-            "product": {
-                "id": product.id,
-                "name": product.name,
-                "category": { "id": category },
-                "course": { "id": product.course_id },
-                "portion": { "id": chosen.value.id },
-                "keywordTags": keyword_tags,
-                "checkout": checkout,
-            },
-            "quantity": quantity,
-            "portion": { "id": chosen.value.id, "choices": [] },
-            "choices": {},
-            "addOns": {},
-            "tags": {},
-            "swaps": {},
-            "tillRequests": [],
-        })))
+        Ok(Self {
+            portion: chosen.label.clone(),
+            body: json!({
+                "product": {
+                    "id": product.id,
+                    "name": product.name,
+                    "category": { "id": category },
+                    "course": { "id": product.course_id },
+                    "portion": { "id": chosen.value.id },
+                    "keywordTags": keyword_tags,
+                    "checkout": checkout,
+                },
+                "quantity": quantity,
+                "portion": { "id": chosen.value.id, "choices": [] },
+                "choices": {},
+                "addOns": {},
+                "tags": {},
+                "swaps": {},
+                "tillRequests": [],
+            }),
+        })
     }
 }
 
@@ -132,7 +145,7 @@ mod tests {
     fn builds_the_line_the_app_sends() {
         let line = BasketLine::new(400300, &product(json!({})), Some("pint"), 2).unwrap();
         assert_eq!(
-            line.0,
+            serde_json::to_value(&line).unwrap(),
             json!({
                 "product": {
                     "id": 10000000311_u64,
@@ -157,7 +170,8 @@ mod tests {
     #[test]
     fn takes_the_default_size_when_none_is_asked_for() {
         let line = BasketLine::new(1, &product(json!({})), None, 1).unwrap();
-        assert_eq!(line.0["portion"]["id"], 1);
+        assert_eq!(line.body["portion"]["id"], 1);
+        assert_eq!(line.portion, "Pint");
     }
 
     #[test]
