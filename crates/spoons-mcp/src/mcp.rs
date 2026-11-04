@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::RoleServer;
-use rmcp::service::RequestContext;
+
+use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
