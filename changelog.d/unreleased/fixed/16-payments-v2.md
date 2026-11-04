@@ -1,0 +1,1 @@
+- **Payments at version 2.0 of the payment API.** The web app moved to it, and preparing a payment at the old routes answered 404. The client now reads the version from the app's bundle as the app does.

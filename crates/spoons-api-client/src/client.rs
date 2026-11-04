@@ -111,7 +111,7 @@ impl Client {
         };
         let version = app_version(&bundle).unwrap_or_else(|| APP_VERSION.to_owned());
         let mut client = Self::new(&key, &base, &version)?;
-        if let Some(payments) = setting(&bundle, "VITE_API_PAYMENT_BASE_URL") {
+        if let Some(payments) = payments_base(&bundle) {
             client.payments_base = payments;
         }
         Ok(client)
@@ -321,6 +321,16 @@ fn app_version(bundle: &str) -> Option<String> {
         .map(|captures| captures[1].to_owned())
 }
 
+/// The payment API's base, versioned the way the app builds it: `/{version}` after the base URL. The bundle has
+/// carried the version in the URL itself before, so a missing version leaves the URL as it is.
+fn payments_base(bundle: &str) -> Option<String> {
+    let url = setting(bundle, "VITE_API_PAYMENT_BASE_URL")?;
+    Some(match setting(bundle, "VITE_API_PAYMENT_VERSION") {
+        Some(version) => format!("{}/{version}", url.trim_end_matches('/')),
+        None => url,
+    })
+}
+
 /// A value from the bundle's baked-in environment, `NAME:"value"`.
 fn setting(bundle: &str, name: &str) -> Option<String> {
     Regex::new(&format!(r#"{name}:"([^"]+)""#))
@@ -331,12 +341,27 @@ fn setting(bundle: &str, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{app_version, setting};
+    use super::{app_version, payments_base, setting};
 
     #[test]
     fn finds_the_app_version_by_where_it_is_used() {
         let bundle = r#"var q=1,Xoe="6.9.1",zHe="60901002";const at={app:{id:"jdw_customer_app",version:Xoe,build:zHe}}"#;
         assert_eq!(app_version(bundle).as_deref(), Some("6.9.1"));
+    }
+
+    #[test]
+    fn versions_the_payment_api_as_the_app_does() {
+        let bundle = r#"DUe={VITE_API_PAYMENT_BASE_URL:"https://api.jdwpayments.net/api",VITE_API_PAYMENT_VERSION:"2.0"}"#;
+        assert_eq!(
+            payments_base(bundle).as_deref(),
+            Some("https://api.jdwpayments.net/api/2.0")
+        );
+        let unversioned =
+            r#"DUe={VITE_API_PAYMENT_BASE_URL:"https://api.jdwpayments.net/api/0.1"}"#;
+        assert_eq!(
+            payments_base(unversioned).as_deref(),
+            Some("https://api.jdwpayments.net/api/0.1")
+        );
     }
 
     #[test]
