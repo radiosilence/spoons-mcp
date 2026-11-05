@@ -727,8 +727,10 @@ impl Spoons {
         })))
     }
 
-    /// Starts paying for a quote and opens the payment page in the browser, where the user enters their card and
-    /// approves it in their banking app. Safe to call again: it never starts a second payment for the same quote.
+    /// Starts paying for a quote. With a saved card it enters the card itself and reports how the payment went;
+    /// otherwise it opens the payment page, where the user enters their card. Either way the bank may ask the user to
+    /// approve it in their banking app. Safe to call again: it never starts a second payment for the same quote, and
+    /// never enters the card twice.
     #[tool(annotations(destructive_hint = true, idempotent_hint = true))]
     async fn pay(
         &self,

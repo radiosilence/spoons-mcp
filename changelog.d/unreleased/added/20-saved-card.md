@@ -1,0 +1,1 @@
+- **`pay` can enter a saved card.** Over HTTP, a card in the `X-Spoons-Card-*` headers is entered on the Axepta payment page by the server, once per payment, with 3-D Secure followed as far as it goes without a person; the payment page is handed out when the card never got there.

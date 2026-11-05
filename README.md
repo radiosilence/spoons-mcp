@@ -57,8 +57,16 @@ and `pay` returns the payment page as a link instead of opening it. The server a
 behind a proxy that does. `--state` says where quotes are kept; the image keeps them in the container, where losing
 them is safe: a quote that no longer exists can't be paid, and a payment nobody pays lapses. Ordering is two steps so the user sees the price before anything starts:
 `quote` prices the basket at the pub's till and changes nothing, and `pay` prepares the card payment and opens the
-payment page (BNP Paribas Axepta) in the browser, where the card is entered and the bank approves it. The tools never
-take card details.
+payment page (BNP Paribas Axepta) in the browser, where the card is entered and the bank approves it.
+
+Over HTTP, `pay` can enter a saved card itself. The card comes in four headers, `X-Spoons-Card-Number`,
+`X-Spoons-Card-Expiry` (`MM/YY`), `X-Spoons-Card-CVC` and `X-Spoons-Card-Name`, which a gateway in front keeps as
+the user's secrets; the tools never take card details as arguments, so a card never passes through the assistant.
+Wetherspoon's keeps no cards, so this is the only way to pay without the page. `pay` posts the card as the page's own
+script does, follows the 3-D Secure redirects and self-submitting pages, then reads the result from the payment API.
+The card is entered at most once per payment, and recorded as entered before it is sent. When the page never took
+it, the payment is still pending and `pay` hands out the page as usual; when something failed after the card was
+sent, it reports the payment's status and does not offer the page, since the card may have been charged.
 
 Quotes and payments are kept under `$XDG_STATE_HOME/spoons` (`~/.local/state/spoons`), with a device id the payment
 API needs to cancel a payment it started. The server is careful about the cases that cost money:
