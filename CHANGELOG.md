@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+### Changed
+
+- **The MCP server's instructions cover repeat orders.** The assistant takes the pub, table and last order from the conversation for "same again", and asks for a table rather than guessing one.
+
 ## 0.3.0
 
 ### Added
