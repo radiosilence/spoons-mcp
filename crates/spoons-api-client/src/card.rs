@@ -244,8 +244,10 @@ fn attribute(tag: &str, name: &str) -> Option<String> {
     Some(unescape(value.as_str()))
 }
 
+type Form = Vec<(String, String)>;
+
 /// Every named input in a piece of HTML, in order, as a form would post them.
-fn inputs(html: &str) -> Vec<(String, String)> {
+fn inputs(html: &str) -> Form {
     INPUT
         .find_iter(html)
         .filter_map(|tag| {
@@ -257,7 +259,7 @@ fn inputs(html: &str) -> Vec<(String, String)> {
 }
 
 /// The form a page submits by itself, as 3-D Secure's interstitial pages do: its action, method and fields.
-fn auto_form(html: &str) -> Option<(String, Method, Vec<(String, String)>)> {
+fn auto_form(html: &str) -> Option<(String, Method, Form)> {
     if !SUBMITS.is_match(html) {
         return None;
     }
