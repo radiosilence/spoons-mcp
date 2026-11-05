@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3
+
+### Changed
+
+- **Card entry gets through Axepta's 3-D Secure 2 page.** The bank's device check is skipped as the page's script skips it on a timeout, and Axepta's answer is followed: a redirect when no challenge is needed, or a clear error when the bank wants the card holder to approve.
+
 ## 0.3.2
 
 ### Changed
