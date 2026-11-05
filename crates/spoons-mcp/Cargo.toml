@@ -26,3 +26,4 @@ uuid = { version = "1", features = ["v4"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+jiff = { version = "0.2.39", default-features = false, features = ["std", "tzdb-bundle-always"] }
