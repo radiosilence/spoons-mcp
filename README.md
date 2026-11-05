@@ -68,6 +68,11 @@ The card is entered at most once per payment, and recorded as entered before it 
 it, the payment is still pending and `pay` hands out the page as usual; when something failed after the card was
 sent, it reports the payment's status and does not offer the page, since the card may have been charged.
 
+Menus are read from the API once per sales area per London day and kept in memory, so a session of quotes does not
+fetch a pub's whole menu (several megabytes) on every call. A quote's prices and total still come from the till, which
+checks the basket live; when the till refuses a basket, or a product is missing, that menu is fetched again on the next
+call.
+
 Quotes and payments are kept under `$XDG_STATE_HOME/spoons` (`~/.local/state/spoons`), with a device id the payment
 API needs to cancel a payment it started. The server is careful about the cases that cost money:
 

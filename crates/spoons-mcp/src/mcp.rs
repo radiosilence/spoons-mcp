@@ -5,8 +5,10 @@
 //! request that could place an order, and nothing cancels an order on its own: cancelling while the bank is
 //! authorising a card can leave a charge with no order.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -49,7 +51,19 @@ pub struct Spoons {
     payments: Payments,
     store: Arc<Store>,
     venues: Arc<OnceCell<Vec<VenueSummary>>>,
+    /// Each sales area's products, fetched at most once per London day, so a busy day of quotes reads the menu a
+    /// handful of times rather than on every call. Prices stay exact: a quote's total comes from the till.
+    menus: Arc<Mutex<Menus>>,
     email: Option<String>,
+}
+
+type Products = Arc<Vec<(u64, Product)>>;
+/// By venue and sales area, with the London day each was fetched.
+type Menus = HashMap<(u64, u64), (jiff::civil::Date, Products)>;
+
+fn london_today() -> jiff::civil::Date {
+    let london = jiff::tz::TimeZone::get("Europe/London").unwrap_or(jiff::tz::TimeZone::UTC);
+    jiff::Timestamp::now().to_zoned(london).date()
 }
 
 pub async fn serve(http: Option<&str>, state: Option<PathBuf>) -> Result<()> {
@@ -69,6 +83,7 @@ pub async fn serve(http: Option<&str>, state: Option<PathBuf>) -> Result<()> {
         payments,
         store: Arc::new(store),
         venues: Arc::new(OnceCell::new()),
+        menus: Arc::default(),
         email: std::env::var("SPOONS_EMAIL")
             .ok()
             .filter(|email| !email.is_empty()),
@@ -406,8 +421,35 @@ impl Spoons {
             .ok_or_else(|| format!("no pub with venue_ref {venue_ref}"))
     }
 
-    /// Every product on the orderable menus of a sales area, with the id of the category it is listed under.
+    /// Every product on the orderable menus of a sales area, with the id of the category it is listed under; from
+    /// today's copy when there is one.
     async fn products(
+        &self,
+        franchise: &str,
+        venue: u64,
+        sales_area: u64,
+    ) -> Result<Products, String> {
+        let today = london_today();
+        let key = (venue, sales_area);
+        if let Some((day, products)) = self.menus.lock().unwrap().get(&key)
+            && *day == today
+        {
+            return Ok(products.clone());
+        }
+        let products = Arc::new(self.fetch_products(franchise, venue, sales_area).await?);
+        self.menus
+            .lock()
+            .unwrap()
+            .insert(key, (today, products.clone()));
+        Ok(products)
+    }
+
+    /// Drops a sales area's cached menu, for when the till disagrees with it.
+    fn forget_menu(&self, venue: u64, sales_area: u64) {
+        self.menus.lock().unwrap().remove(&(venue, sales_area));
+    }
+
+    async fn fetch_products(
         &self,
         franchise: &str,
         venue: u64,
@@ -657,6 +699,10 @@ impl Spoons {
             .sales_area(franchise, venue_ref, Some(request.table))
             .await?;
         let products = self.products(franchise, venue_ref, area).await?;
+        let forget = |error: String| {
+            self.forget_menu(venue_ref, area);
+            error
+        };
         let mut basket = Vec::new();
         let mut lines = Vec::new();
         for item in &request.items {
@@ -668,7 +714,8 @@ impl Spoons {
                         "product {} isn't on the menu for table {}",
                         item.product_id, request.table
                     )
-                })?;
+                })
+                .map_err(forget)?;
             let line = BasketLine::new(*category, product, item.portion.as_deref(), item.quantity)
                 .map_err(fail)?;
             lines.push(Line {
@@ -690,7 +737,8 @@ impl Spoons {
                 &self.store.device_id().map_err(fail)?,
             )
             .await
-            .map_err(fail)?;
+            .map_err(fail)
+            .map_err(forget)?;
         if validation.items.len() == lines.len() {
             for (line, priced) in lines.iter_mut().zip(&validation.items) {
                 if priced.id == line.product_id {
