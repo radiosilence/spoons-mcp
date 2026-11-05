@@ -216,9 +216,42 @@ pub async fn enter(url: &str, card: &Card) -> Result<Entered, CardError> {
             } else {
                 (Method::POST, next, Some(form), url)
             });
+        } else {
+            tracing::info!(
+                page = strip(&url),
+                outline = outline(&body),
+                "3-D Secure stopped on a page"
+            );
         }
     }
     Ok(Entered { hops })
+}
+
+static SCRIPT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<script\b([^>]*)>(.*?)</script>").unwrap());
+static IFRAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<iframe\b[^>]*>").unwrap());
+static LONG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9+/=_-]{60,}").unwrap());
+
+/// What a page does, for working out a 3-D Secure step this doesn't follow: its forms with their field names (not
+/// values), its frames, and its scripts. Long tokens are cut, since they are data rather than logic.
+fn outline(html: &str) -> String {
+    let mut out = Vec::new();
+    for form in FORM.captures_iter(html) {
+        let names: Vec<String> = inputs(&form[2]).into_iter().map(|(name, _)| name).collect();
+        out.push(format!("form {} fields {names:?}", form[1].trim()));
+    }
+    for frame in IFRAME.find_iter(html) {
+        out.push(format!("frame {}", frame.as_str()));
+    }
+    for script in SCRIPT.captures_iter(html) {
+        let body: String = script[2].split_whitespace().collect::<Vec<_>>().join(" ");
+        out.push(format!(
+            "script {} {}",
+            script[1].trim(),
+            body.chars().take(3000).collect::<String>()
+        ));
+    }
+    LONG.replace_all(&out.join("\n"), "…").into_owned()
 }
 
 fn strip(url: &Url) -> String {
