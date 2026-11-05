@@ -1022,8 +1022,14 @@ impl Spoons {
     name = "spoons",
     instructions = "Orders food and drink to a table at a Wetherspoon's pub. Find the pub (find_pubs), look up \
                     products (menu), price the basket (quote) and show the user the lines and total, then pay once \
-                    they agree. pay opens the payment page; the user enters their card and approves it in their \
-                    banking app; follow with order_status. Never call send_duplicate or pay with \
+                    they agree. With a saved card, pay enters it and reports the result; otherwise it gives a payment \
+                    page where the user enters their card. The bank may ask the user to approve the payment in their \
+                    banking app; follow with order_status.\n\n\
+                    The server keeps no history between conversations, so take the pub, table and usual order from \
+                    this one: for \"another\" or \"same again\", quote the last order's items for the same pub and \
+                    table. Never guess a table: a drink is carried to whichever table is given, so ask when the user \
+                    hasn't said one in this conversation, and check it again if they may have moved. Always show a \
+                    quote's total and wait for the user's yes before pay. Never call send_duplicate or pay with \
                     confirm_duplicate without the user's say-so."
 )]
 impl ServerHandler for Spoons {}
