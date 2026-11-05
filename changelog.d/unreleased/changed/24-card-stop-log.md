@@ -1,0 +1,1 @@
+- **Card entry logs the page it stops on.** When 3-D Secure reaches a page that doesn't submit itself, the server logs an outline of it (forms and field names, frames, scripts) for working out the next step.
