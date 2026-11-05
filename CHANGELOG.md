@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+- **`pay` can enter a saved card.** Over HTTP, a card in the `X-Spoons-Card-*` headers is entered on the Axepta payment page by the server, once per payment, with 3-D Secure followed as far as it goes without a person; the payment page is handed out when the card never got there.
+
+### Changed
+
+- **The MCP server reads each pub's menu once a day.** Menus are cached in memory per sales area until midnight in London; quotes are still priced live at the till, and a basket the till refuses refreshes the menu.
+
 ## 0.2.0
 
 ### Added
