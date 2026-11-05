@@ -59,6 +59,9 @@ pub enum Payment {
         /// A held duplicate has been sent anyway, or a send is under way.
         #[serde(default)]
         resubmitted: bool,
+        /// The card has been entered on the payment page by this server, or an attempt is under way. Never twice.
+        #[serde(default)]
+        card_entered: bool,
     },
     Cancelled,
 }
@@ -230,6 +233,7 @@ mod tests {
             duplicate_order: false,
             url_opened: true,
             resubmitted: false,
+            card_entered: false,
         };
         store.save(&order("abc123", now(), prepared)).unwrap();
         let loaded = store.load("abc123").unwrap();
