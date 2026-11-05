@@ -44,11 +44,13 @@ pub struct Spoons {
     venues: Arc<OnceCell<Vec<VenueSummary>>>,
     /// Each sales area's products, fetched at most once per London day, so a busy day of quotes reads the menu a
     /// handful of times rather than on every call. Prices stay exact: a quote's total comes from the till.
-    menus: Arc<Mutex<HashMap<(u64, u64), (jiff::civil::Date, Products)>>>,
+    menus: Arc<Mutex<Menus>>,
     email: Option<String>,
 }
 
 type Products = Arc<Vec<(u64, Product)>>;
+/// By venue and sales area, with the London day each was fetched.
+type Menus = HashMap<(u64, u64), (jiff::civil::Date, Products)>;
 
 fn london_today() -> jiff::civil::Date {
     let london = jiff::tz::TimeZone::get("Europe/London").unwrap_or(jiff::tz::TimeZone::UTC);
