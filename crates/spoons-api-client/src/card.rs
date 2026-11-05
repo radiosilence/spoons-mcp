@@ -3,16 +3,22 @@
 //!
 //! The page is a form of hidden fields describing the payment; its script adds the card and posts the lot to
 //! `payinterim.aspx`. What follows is 3-D Secure: redirects and pages that submit themselves, which are followed
-//! here, and possibly a challenge in the card holder's banking app. Whether the payment went through is the payment
+//! here, then Axepta's 3-D Secure 2 page, whose script runs the bank's device check in a hidden frame and waits for
+//! the result. Without a browser the check is skipped the way that script skips it when the bank is slow: Axepta is
+//! told it failed, and answers with a redirect when the bank lets the payment through without the card holder, or
+//! a challenge for the banking app, which needs the payment page. Whether the payment went through is the payment
 //! API's to say ([`crate::Payments::status`]), not anything these pages show.
 
 use std::fmt;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use regex::Regex;
 use reqwest::header::{CONTENT_TYPE, HeaderValue, ORIGIN, REFERER};
 use reqwest::{Method, StatusCode, Url, redirect};
+use serde_json::Value;
 
 /// Only pages under here are fetched with a card, and only https ones after it.
 pub const PAYMENT_PAGE: &str = "https://paymentpage.axepta.bnpparibas/";
@@ -158,6 +164,8 @@ pub async fn enter(url: &str, card: &Card) -> Result<Entered, CardError> {
     let after = |error: String| CardError::AfterSending(error);
     let mut hops = vec![strip(&page_url)];
     let mut request = Some((Method::POST, post, Some(fields), page_url));
+    // How the 3-D Secure 2 page sends the card holder on once it has an answer.
+    let mut redirect_by_post = true;
     while let Some((method, url, form, referer)) = request.take() {
         if hops.len() > MAX_HOPS {
             return Err(after(format!(
@@ -216,6 +224,33 @@ pub async fn enter(url: &str, card: &Card) -> Result<Entered, CardError> {
             } else {
                 (Method::POST, next, Some(form), url)
             });
+        } else if let Some(step) = three_ds2(&body) {
+            let (method_skipped, by_post) = step.map_err(after)?;
+            redirect_by_post = by_post;
+            let next = Url::parse(&method_skipped.0).map_err(|e| after(e.to_string()))?;
+            request = Some((Method::POST, next, Some(method_skipped.1), url));
+        } else if let Some(answer) = answer(&body) {
+            match answer.map_err(after)? {
+                Answer::Redirect(to) => {
+                    let to = url.join(&to).map_err(|e| after(e.to_string()))?;
+                    request = Some(if redirect_by_post {
+                        let (action, form) = post_redirect(&to).map_err(after)?;
+                        (Method::POST, action, Some(form), url)
+                    } else {
+                        (Method::GET, to, None, url)
+                    });
+                }
+                Answer::Challenge => {
+                    return Err(after(
+                        "the bank wants the card holder to approve the payment, which needs the payment page".into(),
+                    ));
+                }
+                Answer::Fallback => {
+                    return Err(after(
+                        "the bank fell back to the older 3-D Secure, which isn't followed".into(),
+                    ));
+                }
+            }
         } else {
             tracing::info!(
                 page = strip(&url),
@@ -225,6 +260,106 @@ pub async fn enter(url: &str, card: &Card) -> Result<Entered, CardError> {
         }
     }
     Ok(Entered { hops })
+}
+
+static DDD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)var\s+dddV2data\s*=\s*(\{.*?\});").unwrap());
+static CTOP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"ctop:([A-Za-z0-9+/=]+)").unwrap());
+
+/// On Axepta's 3-D Secure 2 page, the request that skips the bank's device check, as the page's script sends it
+/// when the check times out, and whether the page redirects by POST. `None` on any other page.
+fn three_ds2(html: &str) -> Option<Result<((String, Form), bool), String>> {
+    let data = DDD.captures(html)?;
+    Some((|| {
+        let data: Value = serde_json::from_str(&data[1])
+            .map_err(|e| format!("unreadable 3-D Secure data: {e}"))?;
+        let by_post = data["rt"].as_str() != Some("GET");
+        let vd = data["vd"].as_str().ok_or("3-D Secure data without vd")?;
+        let vd = STANDARD
+            .decode(vd)
+            .map_err(|e| format!("3-D Secure vd isn't base64: {e}"))?;
+        let vd: Value =
+            serde_json::from_slice(&vd).map_err(|e| format!("3-D Secure vd isn't JSON: {e}"))?;
+        let trans_id = vd["threeDSServerTransID"]
+            .as_str()
+            .ok_or("no 3-D Secure transaction id")?;
+        let form = vd["threeDSMethodDataForm"]
+            .as_str()
+            .ok_or("no 3-D Secure method data")?;
+        let notify = vd["threeDSMethodData"]["threeDSMethodNotificationURL"]
+            .as_str()
+            .ok_or("no 3-D Secure notification address")?;
+        Ok((
+            (
+                format!("{notify}&threeDSMethodNotificationFailed=true"),
+                vec![("threeDSMethodData".to_owned(), with_pay_id(form, trans_id))],
+            ),
+            by_post,
+        ))
+    })())
+}
+
+/// The page's script adds the transaction to the method data's notification address before sending it.
+fn with_pay_id(form: &str, trans_id: &str) -> String {
+    let added = || -> Option<String> {
+        let mut data: Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(form.trim_end_matches('=')).ok()?)
+                .ok()?;
+        let notify = data.get_mut("threeDSMethodNotificationURL")?;
+        let url = notify.as_str()?;
+        if url.contains("payId") {
+            return None;
+        }
+        *notify = Value::String(format!("{url}&payId={trans_id}"));
+        Some(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&data).ok()?))
+    };
+    added().unwrap_or_else(|| form.to_owned())
+}
+
+enum Answer {
+    /// No challenge: on to Axepta's result.
+    Redirect(String),
+    Challenge,
+    Fallback,
+}
+
+/// The answer Axepta's 3-D Secure frames post to the page, as `ctop:<base64 JSON>`.
+fn answer(html: &str) -> Option<Result<Answer, String>> {
+    let encoded = CTOP.captures(html)?;
+    Some((|| {
+        let json = STANDARD
+            .decode(&encoded[1])
+            .map_err(|e| format!("3-D Secure answer isn't base64: {e}"))?;
+        let json: Value = serde_json::from_slice(&json)
+            .map_err(|e| format!("3-D Secure answer isn't JSON: {e}"))?;
+        match json["Type"].as_str() {
+            Some("R") => Ok(Answer::Redirect(
+                json["Data"]
+                    .as_str()
+                    .ok_or("redirect without an address")?
+                    .to_owned(),
+            )),
+            Some("C") => Ok(Answer::Challenge),
+            Some("F") => Ok(Answer::Fallback),
+            other => Err(format!("unknown 3-D Secure answer {other:?}")),
+        }
+    })())
+}
+
+/// A redirect as the page makes it by POST: the query's pairs become form fields, taken as they are written, so
+/// they are encoded a second time exactly as the browser's form encodes them.
+fn post_redirect(to: &Url) -> Result<(Url, Form), String> {
+    let query = to.query().ok_or("a POST redirect without a query")?;
+    let mut action = to.clone();
+    action.set_query(None);
+    let form = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((key, value)) => (key.to_owned(), value.to_owned()),
+            None => (pair.to_owned(), String::new()),
+        })
+        .collect();
+    Ok((action, form))
 }
 
 static SCRIPT: LazyLock<Regex> =
@@ -380,6 +515,54 @@ mod tests {
                 ("Counter".into(), String::new())
             ]
         );
+    }
+
+    #[test]
+    fn skips_the_device_check_as_the_page_does() {
+        let method =
+            URL_SAFE_NO_PAD.encode(br#"{"threeDSMethodNotificationURL":"https://pp/cb.aspx?x=1"}"#);
+        let vd = STANDARD.encode(format!(
+            r#"{{"threeDSServerTransID":"t-1","threeDSMethodURL":"https://acs/m","threeDSMethodDataForm":"{method}",
+               "threeDSMethodData":{{"threeDSMethodNotificationURL":"https://pp/cb.aspx?x=1"}}}}"#
+        ));
+        let page = format!(
+            r#"<script> var dddV2data = {{"rt":"POST","vd":"{vd}"}}; var json = dddV2data.vd;</script>"#
+        );
+        let ((url, form), by_post) = three_ds2(&page).unwrap().unwrap();
+        assert_eq!(
+            url,
+            "https://pp/cb.aspx?x=1&threeDSMethodNotificationFailed=true"
+        );
+        assert!(by_post);
+        let sent: Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(&form[0].1).unwrap()).unwrap();
+        assert_eq!(
+            sent["threeDSMethodNotificationURL"],
+            "https://pp/cb.aspx?x=1&payId=t-1"
+        );
+        assert!(three_ds2("<html></html>").is_none());
+    }
+
+    #[test]
+    fn reads_the_answer_and_redirects_as_the_page_does() {
+        let message =
+            |json: &str| format!("parent.postMessage('ctop:{}', '*')", STANDARD.encode(json));
+        let Some(Ok(Answer::Redirect(to))) = answer(&message(
+            r#"{"Type":"R","Data":"https://pp/done.aspx?a=b%3D&c="}"#,
+        )) else {
+            panic!("expected a redirect");
+        };
+        let (action, form) = post_redirect(&Url::parse(&to).unwrap()).unwrap();
+        assert_eq!(action.as_str(), "https://pp/done.aspx");
+        assert_eq!(
+            form,
+            [("a".into(), "b%3D".into()), ("c".into(), String::new())]
+        );
+        assert!(matches!(
+            answer(&message(r#"{"Type":"C","Data":"{}"}"#)),
+            Some(Ok(Answer::Challenge))
+        ));
+        assert!(answer("<p>nothing</p>").is_none());
     }
 
     #[test]
