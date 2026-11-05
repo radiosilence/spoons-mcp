@@ -1,0 +1,1 @@
+- **The MCP server reads each pub's menu once a day.** Menus are cached in memory per sales area until midnight in London; quotes are still priced live at the till, and a basket the till refuses refreshes the menu.
