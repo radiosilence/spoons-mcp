@@ -60,6 +60,11 @@ them is safe: a quote that no longer exists can't be paid, and a payment nobody 
 payment page (BNP Paribas Axepta) in the browser, where the card is entered and the bank approves it. The tools never
 take card details.
 
+Menus are read from the API once per sales area per London day and kept in memory, so a session of quotes does not
+fetch a pub's whole menu (several megabytes) on every call. A quote's prices and total still come from the till, which
+checks the basket live; when the till refuses a basket, or a product is missing, that menu is fetched again on the next
+call.
+
 Quotes and payments are kept under `$XDG_STATE_HOME/spoons` (`~/.local/state/spoons`), with a device id the payment
 API needs to cancel a payment it started. The server is careful about the cases that cost money:
 
