@@ -266,9 +266,12 @@ static DDD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)var\s+dddV2data\s*=\s*(\{.*?\});").unwrap());
 static CTOP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"ctop:([A-Za-z0-9+/=]+)").unwrap());
 
+/// The address and form that skip the device check, and whether the page redirects by POST.
+type SkipMethod = ((String, Form), bool);
+
 /// On Axepta's 3-D Secure 2 page, the request that skips the bank's device check, as the page's script sends it
 /// when the check times out, and whether the page redirects by POST. `None` on any other page.
-fn three_ds2(html: &str) -> Option<Result<((String, Form), bool), String>> {
+fn three_ds2(html: &str) -> Option<Result<SkipMethod, String>> {
     let data = DDD.captures(html)?;
     Some((|| {
         let data: Value = serde_json::from_str(&data[1])
