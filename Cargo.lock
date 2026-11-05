@@ -1895,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "spoons-api-client"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "regex",
  "reqwest",
@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "spoons-mcp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "axum",
