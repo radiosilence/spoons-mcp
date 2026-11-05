@@ -18,7 +18,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use spoons_api_client::{
-    BasketLine, CardOrder, Client, Error, Item, PaymentStatus, Payments, Product, VenueSummary,
+    BasketLine, Card, CardError, CardOrder, Client, Error, Item, PAYMENT_PAGE, PaymentStatus,
+    Payments, Product, VenueSummary,
 };
 use tokio::sync::OnceCell;
 use tokio::time::{Instant, sleep};
@@ -30,9 +31,17 @@ const MAX_QUANTITY: u32 = 10;
 const MAX_WAIT: u64 = 55;
 const POLL: Duration = Duration::from_secs(5);
 const MAX_MENU_RESULTS: usize = 50;
-const PAYMENT_PAGE: &str = "https://paymentpage.axepta.bnpparibas/";
 /// Over HTTP, where the receipt goes, per request: the gateway in front injects each user's own.
 const EMAIL_HEADER: &str = "x-spoons-email";
+/// Over HTTP, the card `pay` enters on the payment page: all four, or none, in which case the user pays on the page.
+const CARD_HEADERS: [&str; 4] = [
+    "x-spoons-card-number",
+    "x-spoons-card-expiry",
+    "x-spoons-card-cvc",
+    "x-spoons-card-name",
+];
+/// How long `pay` watches a payment after entering the card, before leaving the rest to order_status.
+const SETTLE: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct Spoons {
@@ -230,6 +239,154 @@ impl Spoons {
             Some(parts) => header(parts),
             None => self.email.clone(),
         }
+    }
+
+    /// The card to pay with, from this request's headers. Only over HTTP, where the gateway in front keeps it as the
+    /// user's secret; a half-configured card is refused rather than quietly falling back to the payment page.
+    fn card(&self, ctx: &RequestContext<RoleServer>) -> Result<Option<Card>, String> {
+        let Some(parts) = ctx.extensions.get::<http::request::Parts>() else {
+            return Ok(None);
+        };
+        let values = CARD_HEADERS.map(|name| {
+            parts
+                .headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        });
+        match values {
+            [None, None, None, None] => Ok(None),
+            [Some(number), Some(expiry), Some(cvc), Some(name)] => {
+                Card::new(number, expiry, cvc, name)
+                    .map(Some)
+                    .map_err(|error| format!("the saved card is unusable: {error}"))
+            }
+            _ => {
+                Err("the saved card is missing some of its number, expiry, CVC and name".to_owned())
+            }
+        }
+    }
+
+    /// Enters the card on a pending payment's page, once ever, then watches the payment for a little while. Hands
+    /// out the payment page instead when the card never got there.
+    async fn enter_card(&self, order: &mut Order, card: &Card, retried: bool) -> String {
+        let Payment::Prepared {
+            transaction_id,
+            url,
+            card_entered,
+            ..
+        } = &mut order.payment
+        else {
+            unreachable!("entered a card for a quote with no payment prepared");
+        };
+        let (transaction_id, url) = (transaction_id.clone(), url.clone());
+        // Recorded first, so a server that dies while entering it never enters it again.
+        *card_entered = true;
+        if let Err(error) = self.store.save(order) {
+            tracing::warn!(%error, quote_id = order.quote_id, "couldn't record entering the card; leaving it to the user");
+            if let Payment::Prepared { card_entered, .. } = &mut order.payment {
+                *card_entered = false;
+            }
+            return self.hand_out(order, true, false, retried);
+        }
+        let note = match spoons_api_client::enter(&url, card).await {
+            Ok(entered) => {
+                tracing::info!(hops = ?entered.hops, quote_id = order.quote_id, "entered the card");
+                None
+            }
+            Err(CardError::NotSent(reason)) => {
+                tracing::warn!(reason, quote_id = order.quote_id, "couldn't enter the card");
+                return self.hand_out(order, true, false, retried);
+            }
+            Err(error @ CardError::AfterSending(_)) => {
+                tracing::warn!(%error, quote_id = order.quote_id, "entering the card went wrong");
+                Some(error.to_string())
+            }
+        };
+        // Pending stays in the wait: the payment API can take a moment to hear from the payment page.
+        let deadline = Instant::now() + SETTLE;
+        let mut status = None;
+        loop {
+            match self
+                .payments
+                .status(&order.franchise, order.venue_ref, &transaction_id)
+                .await
+            {
+                Ok(now) => {
+                    let waiting = matches!(
+                        now,
+                        PaymentStatus::Pending | PaymentStatus::InProgress | PaymentStatus::Paid
+                    );
+                    status = Some(now);
+                    if !waiting {
+                        break;
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "couldn't read the payment's status"),
+            }
+            if Instant::now() + POLL > deadline {
+                break;
+            }
+            sleep(POLL).await;
+        }
+        let Some(status) = status else {
+            return text(json!({
+                "quote_id": order.quote_id,
+                "card": "The saved card was entered, but the payment's status couldn't be read. Don't pay again; \
+                         call order_status with wait_secs.",
+            }));
+        };
+        if status == PaymentStatus::Pending && note.is_none() {
+            // The page never took the card, so the user can still pay on it. It is the same payment, so nothing is
+            // charged twice.
+            let mut handed: Value =
+                serde_json::from_str(&self.hand_out(order, true, false, retried))
+                    .unwrap_or_default();
+            handed["card"] = json!(
+                "The saved card was entered but the payment page didn't take it; the user can pay on the page."
+            );
+            return text(handed);
+        }
+        let mut report = status_report(order, &status);
+        report["card"] = json!(match (&note, &status) {
+            (Some(note), _) => format!(
+                "Entering the saved card went wrong ({note}). Don't pay again: call order_status, and if it stays \
+                 unclear, ask the user to look for a charge or a receipt."
+            ),
+            (None, PaymentStatus::Placed { .. } | PaymentStatus::Paid) => "Paid with the saved card.".to_owned(),
+            (None, PaymentStatus::InProgress) =>
+                "The saved card was entered and is being authorised; the user may need to approve it in their \
+                 banking app. Call order_status with wait_secs."
+                    .to_owned(),
+            (None, _) => "The saved card was entered; see payment for what happened.".to_owned(),
+        });
+        text(report)
+    }
+
+    /// Pays a pending payment with the saved card when there is one and it hasn't been tried, and otherwise hands
+    /// out the payment page.
+    async fn settle(
+        &self,
+        order: &mut Order,
+        card: Option<&Card>,
+        confirm_duplicate: bool,
+        reopen: bool,
+        retried: bool,
+    ) -> String {
+        if let (
+            Some(card),
+            Payment::Prepared {
+                duplicate_order,
+                card_entered: false,
+                ..
+            },
+        ) = (card, &order.payment)
+            && (!*duplicate_order || confirm_duplicate)
+        {
+            return self.enter_card(order, card, retried).await;
+        }
+        self.hand_out(order, confirm_duplicate, reopen, retried)
     }
 
     async fn venues(&self) -> Result<&[VenueSummary], String> {
@@ -578,6 +735,7 @@ impl Spoons {
         ctx: RequestContext<RoleServer>,
         Parameters(request): Parameters<PayRequest>,
     ) -> Result<String, String> {
+        let card = self.card(&ctx)?;
         let _lock = self.hold(&request.quote_id)?;
         let mut order = self.store.load(&request.quote_id).map_err(fail)?;
         // A payment whose request got no clear answer may exist, but its payment page only ever came back in that
@@ -593,12 +751,15 @@ impl Spoons {
                     .await
                     .map_err(fail)?;
                 return match status {
-                    PaymentStatus::Pending => Ok(self.hand_out(
-                        &mut order,
-                        request.confirm_duplicate,
-                        request.reopen,
-                        false,
-                    )),
+                    PaymentStatus::Pending => Ok(self
+                        .settle(
+                            &mut order,
+                            card.as_ref(),
+                            request.confirm_duplicate,
+                            request.reopen,
+                            false,
+                        )
+                        .await),
                     PaymentStatus::Cancelled => {
                         order.payment = Payment::Cancelled;
                         self.store.save(&order).map_err(fail)?;
@@ -640,6 +801,7 @@ impl Spoons {
                     duplicate_order: prepared.duplicate_order,
                     url_opened: false,
                     resubmitted: false,
+                    card_entered: false,
                 };
                 if let Err(error) = self.store.save(&order) {
                     // Nobody has the payment page yet, so cancelling is safe, and a payment that isn't recorded
@@ -658,7 +820,15 @@ impl Spoons {
                         }
                     ));
                 }
-                Ok(self.hand_out(&mut order, request.confirm_duplicate, false, retried))
+                Ok(self
+                    .settle(
+                        &mut order,
+                        card.as_ref(),
+                        request.confirm_duplicate,
+                        false,
+                        retried,
+                    )
+                    .await)
             }
             Err(Error::Unconfirmed { detail, .. }) => {
                 // The detail can hold the payment page, which must not reach anyone: see above.
