@@ -1897,6 +1897,7 @@ dependencies = [
 name = "spoons-api-client"
 version = "0.3.2"
 dependencies = [
+ "base64",
  "regex",
  "reqwest",
  "serde",
