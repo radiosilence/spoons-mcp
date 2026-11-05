@@ -64,6 +64,10 @@ Over HTTP, `pay` can enter a saved card itself. The card comes in four headers, 
 the user's secrets; the tools never take card details as arguments, so a card never passes through the assistant.
 Wetherspoon's keeps no cards, so this is the only way to pay without the page. `pay` posts the card as the page's own
 script does, follows the 3-D Secure redirects and self-submitting pages, then reads the result from the payment API.
+Axepta's 3-D Secure 2 page runs the bank's device check in a hidden frame through script; without a browser, `pay`
+skips it the way that script does when the bank is slow, by telling Axepta the check failed. Axepta then either
+redirects to its result, when the bank lets the payment through without the card holder, or asks for a challenge in
+the banking app, which needs the payment page: `pay` reports that the card was sent and not to pay again.
 The card is entered at most once per payment, and recorded as entered before it is sent. When the page never took
 it, the payment is still pending and `pay` hands out the page as usual; when something failed after the card was
 sent, it reports the payment's status and does not offer the page, since the card may have been charged.
