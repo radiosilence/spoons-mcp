@@ -1,6 +1,6 @@
 # spoons-mcp
 
-Client and command-line tool for the unofficial API behind Wetherspoon's order-and-pay app. `spoons-api-client` speaks the API; the `spoons` binary (crate `spoons-mcp`) dumps pubs and menus into `data/`, extracts prices, ranks pubs into tiers by what a round costs, and serves a GraphQL API for ordering to a table as an MCP server (`spoons_schema` and `spoons`, with the SDL snapshot in `crates/spoons-mcp/schema.graphql`; `UPDATE_SNAPSHOTS=1 cargo test` rewrites it). The README explains the API's quirks. Releases publish the `spoons` binary, attached to GitHub releases, and the container image `ghcr.io/radiosilence/spoons-mcp` (the MCP server over HTTP, which jaritanet runs behind mcp-gateway); there are no crates.io packages.
+Client and command-line tool for the unofficial API behind Wetherspoon's order-and-pay app. `spoons-api-client` speaks the API; the `spoons` binary (crate `spoons-mcp`) dumps pubs and menus into `data/`, extracts prices, ranks pubs into tiers by what a round costs, and serves a GraphQL API for ordering to a table as an MCP server (`spoons_schema` and `spoons`, with the SDL snapshot in `crates/spoons-mcp/schema.graphql`; `UPDATE_SNAPSHOTS=1 cargo test` rewrites it), with an MCP App: Preact in `crates/spoons-mcp/app`, built by `just app` into the committed `crates/spoons-mcp/assets/app.html` that the binary embeds. The README explains the API's quirks. Releases publish the `spoons` binary, attached to GitHub releases, and the container image `ghcr.io/radiosilence/spoons-mcp` (the MCP server over HTTP, which jaritanet runs behind mcp-gateway); there are no crates.io packages.
 
 ## Git
 
@@ -22,6 +22,8 @@ Client and command-line tool for the unofficial API behind Wetherspoon's order-a
 just check   # actionlint, Cargo.lock drift, fmt --check, clippy -D warnings, tests (offline)
 just fast    # the seconds-long subset; the pre-push hook runs it
 just fmt
+just app     # rebuild the MCP App after changing crates/spoons-mcp/app; CI fails a stale assets/app.html
+just app-e2e # the app in the ext-apps reference host, against fixtures, with screenshots
 ```
 
 `data/` and `recon/` are gitignored working output; tests never call the live API.
