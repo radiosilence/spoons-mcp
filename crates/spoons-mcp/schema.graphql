@@ -230,13 +230,21 @@ type Menu {
 		kinds: [Kind!]
 	): [MenuSection!]!
 	"""
-	Every matching product, in the pub's order. Cursors are product ids.
+	Products, in the pub's order, or with `search`, best match first. Search forgives what voice gets wrong:
+	misheard words ("abot"), brand styling ("sumo" finds "Mad Squirrel $umo"), and what a drink is rather than
+	its name ("mocktail", "virgin", "alcohol free", "beer", "soft drink"), across name, the pub's category,
+	kind, style, notes and description. When nothing has every word, the nearest come back with
+	`closeMatches`. Cursors are product ids; page with `first` and `after`. Free once the menu is read.
 	"""
 	products(
 		"""
-		Only products matching every word.
+		What someone asked for, in their words.
 		"""
 		search: String,		kinds: [Kind!],
+		"""
+		Only the pub's own category (or group) of this name, from `categories`; forgiving.
+		"""
+		category: String,
 		"""
 		Only guest ales.
 		"""
@@ -251,6 +259,11 @@ type Menu {
 		first: Int,		after: String
 	): ProductConnection!
 	"""
+	The pub's own menu categories, as its app lists them ("0% cocktails", "Soft drinks", "Spritz cocktails"),
+	with each one's kind and how many products are in it. Pass a name to `products(category:)`. Free.
+	"""
+	categories: [MenuCategory!]!
+	"""
 	The guest real ales on now: the rotating casks, named "Brewery - Beer", that a search for "ale" misses.
 	"""
 	guestAles: [Product!]!
@@ -262,6 +275,18 @@ type Menu {
 	One product by id, whatever the menu's filters.
 	"""
 	product(id: ID!): Product
+}
+
+"""
+A category of the pub's own menu.
+"""
+type MenuCategory {
+	name: String!
+	"""
+	The kind most of it is; the first product's.
+	"""
+	kind: Kind!
+	count: Int!
 }
 
 """
@@ -697,6 +722,11 @@ type ProductConnection {
 	How many match, before paging.
 	"""
 	totalCount: Int!
+	"""
+	Nothing matched every word of the search, so these are the nearest, best first. Say so rather than
+	presenting them as what was asked for.
+	"""
+	closeMatches: Boolean!
 }
 
 """
@@ -830,6 +860,11 @@ type PubConnection {
 	How many match, before paging.
 	"""
 	totalCount: Int!
+	"""
+	Nothing matched every word of the search, so these are the nearest, best first. Say so rather than
+	presenting them as what was asked for.
+	"""
+	closeMatches: Boolean!
 }
 
 """

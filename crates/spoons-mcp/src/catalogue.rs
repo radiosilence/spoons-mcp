@@ -124,6 +124,9 @@ pub struct Entry {
     pub category: String,
     pub group: Option<String>,
     pub kind: Kind,
+    /// What else it is, for an alcohol-free drink: a lager, a stout, a cider. Searching "alcohol free lager" needs
+    /// both.
+    pub also: Option<Kind>,
     pub guest: bool,
     pub brewery: Option<String>,
     /// The name without the brewery, for a guest ale.
@@ -152,28 +155,6 @@ impl Entry {
             .iter()
             .find(|size| size.is_default)
             .or(self.sizes.first())
-    }
-
-    pub fn matches(&self, needle: &str) -> bool {
-        let needle = fold(needle);
-        needle.split_whitespace().all(|word| {
-            fold(&self.product.name).contains(word)
-                || self
-                    .brewery
-                    .as_deref()
-                    .is_some_and(|b| fold(b).contains(word))
-                || self
-                    .style
-                    .as_deref()
-                    .is_some_and(|s| fold(s).contains(word))
-                || fold(&self.category).contains(word)
-                || self
-                    .group
-                    .as_deref()
-                    .is_some_and(|g| fold(g).contains(word))
-                || fold(self.kind.label()).contains(word)
-                || self.notes.iter().any(|n| fold(n).contains(word))
-        })
     }
 }
 
@@ -308,12 +289,28 @@ fn entry(
         }
         _ => (None, product.name.clone()),
     };
+    let also = (kind == Kind::AlcoholFree)
+        .then(|| alcohol_free_also(&product.name))
+        .flatten();
     let guest = kind == Kind::CaskAle && (listed.is_some() || product.name.contains(" - "));
     let units = number(&UNITS, &description).or_else(|| listed.and_then(|a| a.units));
     let kcal = product.calories.or_else(|| number(&KCAL, &description));
     let abv = abv.or_else(|| listed.and_then(|a| a.abv));
     let (notes, origin) = notes(&description, kind);
-    let colour = colour(listed, &description, kind, group, &product.name);
+    // Wines carry their colour as a keyword (`WO`: red, white, rose, spark), which beats guessing from the group.
+    let wine = product
+        .keywords
+        .iter()
+        .find(|k| k.kind == "WO")
+        .and_then(|k| k.value.as_str())
+        .unwrap_or("");
+    let colour = colour(
+        listed,
+        &description,
+        kind,
+        Some(&format!("{} {wine}", group.unwrap_or(""))),
+        &product.name,
+    );
     let sizes = sizes(product, abv);
     let why_not = BasketLine::new(0, product, None, 1)
         .err()
@@ -324,6 +321,7 @@ fn entry(
         category: category.trim().to_owned(),
         group: group.map(|g| g.trim().to_owned()).filter(|g| !g.is_empty()),
         kind,
+        also,
         guest,
         brewery,
         short_name,
@@ -441,6 +439,36 @@ fn by_words(text: &str) -> Option<Kind> {
     }
 }
 
+/// What an alcohol-free drink would be with the alcohol, from its name.
+fn alcohol_free_also(name: &str) -> Option<Kind> {
+    let name = fold(name);
+    let has = |words: &[&str]| words.iter().any(|w| name.contains(w));
+    if has(&["guinness", "stout"]) {
+        Some(Kind::Stout)
+    } else if has(&["kopparberg", "cider", "rekorderlig", "thatchers"]) {
+        Some(Kind::Cider)
+    } else if has(&["punk", "ipa", "pale ale"]) {
+        Some(Kind::CraftAndWorld)
+    } else if has(&[
+        "beck",
+        "corona",
+        "heineken",
+        "stella",
+        "peroni",
+        "madri",
+        "erdinger",
+        "lager",
+        "san miguel",
+        "bud",
+    ]) {
+        Some(Kind::Lager)
+    } else if has(&["gin", "gordon", "tanqueray"]) {
+        Some(Kind::Spirits)
+    } else {
+        None
+    }
+}
+
 /// Taste notes, and for wine where it comes from, from a description such as "4.2% ABV. 2.4 units. Black
 /// coloured, roasted and chocolaty" or "Valle Central, Chile\n12% ABV\nJuicy and smooth".
 fn notes(description: &str, kind: Kind) -> (Vec<String>, Option<String>) {
@@ -541,6 +569,13 @@ fn colour(
         Kind::Cider => ("#e8b84a", "Golden"),
         Kind::CaskAle => ("#b8732e", "Amber"),
         Kind::Wine if group.contains("red") => ("#6e1423", "Red"),
+        Kind::Wine
+            if group.contains("spark")
+                || group.contains("prosecco")
+                || group.contains("champagne") =>
+        {
+            ("#f3e6a8", "Sparkling")
+        }
         Kind::Wine if group.contains("ros") || name.contains("rosé") || name.contains("rose") => {
             ("#f2a7a0", "Rosé")
         }
@@ -686,8 +721,8 @@ mod tests {
         );
         assert_eq!(e.sizes[0].millilitres, Some(189.0));
         assert_eq!(e.sizes[2].units, Some(2.4));
-        assert!(e.matches("roosters"));
-        assert!(e.matches("ale"));
+        assert!(crate::search::product_matches("roosters", &e));
+        assert!(crate::search::product_matches("ale", &e));
     }
 
     #[test]

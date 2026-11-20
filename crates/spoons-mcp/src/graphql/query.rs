@@ -8,7 +8,6 @@ use async_graphql::{Context, ID, Object, Result};
 use super::types::{
     Basket, LatLngInput, ListConnection, Now, Order, Pub, Quote, gql, page, service,
 };
-use crate::catalogue::fold;
 use crate::session::Session;
 
 pub struct QueryRoot;
@@ -43,53 +42,43 @@ impl QueryRoot {
         after: Option<String>,
     ) -> Result<ListConnection<Pub>> {
         let venues = service(ctx).venues().await.map_err(gql)?;
-        let needle = query.as_deref().map(fold);
         let point = near.map(|n| (n.lat, n.lng));
-        let mut found: Vec<Pub> = venues
-            .iter()
-            .filter(|v| !v.is_closed)
-            .filter(|v| {
-                needle.as_deref().is_none_or(|needle| {
-                    let a = &v.address;
-                    let hay = fold(
-                        &[
-                            Some(&v.name),
-                            a.town.as_ref(),
-                            a.postcode.as_ref(),
-                            a.line2.as_ref(),
-                            a.line3.as_ref(),
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .map(String::as_str)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    );
-                    let hay_compact = hay.replace(' ', "");
-                    needle
-                        .split_whitespace()
-                        .all(|word| hay.contains(word) || hay_compact.contains(word))
-                })
-            })
-            .map(|v| Pub {
-                distance: point
-                    .zip(v.address.location.as_ref())
-                    .map(|(p, at)| distance_m(p, (at.latitude, at.longitude))),
-                venue: v.clone(),
+        let open = venues.iter().filter(|v| !v.is_closed);
+        // Misheard names ("Broccoli Barge") and towns still find their pub, best match first; with `near` too,
+        // equally good matches go nearest first.
+        let (ranked, close): (Vec<(f32, &spoons_api_client::VenueSummary)>, bool) = match query
+            .as_deref()
+            .and_then(|q| crate::search::pubs(q, open.clone()))
+        {
+            Some(r) => (r.items, r.close),
+            None => (open.map(|v| (0.0, v)).collect(), false),
+        };
+        let mut found: Vec<(f32, Pub)> = ranked
+            .into_iter()
+            .map(|(score, v)| {
+                (
+                    score,
+                    Pub {
+                        distance: point
+                            .zip(v.address.location.as_ref())
+                            .map(|(p, at)| distance_m(p, (at.latitude, at.longitude))),
+                        venue: v.clone(),
+                    },
+                )
             })
             .collect();
-        if point.is_some() {
-            found.sort_by(|a, b| {
+        found.sort_by(|(sa, a), (sb, b)| {
+            ((sb * 10.0).round()).total_cmp(&(sa * 10.0).round()).then(
                 a.distance
                     .unwrap_or(f64::MAX)
-                    .total_cmp(&b.distance.unwrap_or(f64::MAX))
-            });
-        }
+                    .total_cmp(&b.distance.unwrap_or(f64::MAX)),
+            )
+        });
         let items = found
             .into_iter()
-            .map(|p| (p.venue.venue_ref.to_string(), p))
+            .map(|(_, p)| (p.venue.venue_ref.to_string(), p))
             .collect();
-        page(items, after, first, 5, 50)
+        page(items, after, first, 5, 50, close)
     }
 
     /// One pub by its ref. Free once the pub list is in.

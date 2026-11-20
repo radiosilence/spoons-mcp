@@ -11,6 +11,7 @@ mod graphql;
 mod mcp;
 mod orders;
 mod prices;
+mod search;
 mod service;
 mod session;
 mod tiers;

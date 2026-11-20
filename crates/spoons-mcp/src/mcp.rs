@@ -44,7 +44,7 @@ go as a JSON string.\n\n\
 Ordering: find the pub (`pubs(query:)`, or `pubs(near:)` nearest first), read what's on \
 (`pub(ref:) { menu(table:) { sections { label products { id name abv portions { name price { formatted } } } } } }`; \
 `guestAles` for the guest casks, which are named \"Brewery - Beer\" and have no \"ale\" in the name; \
-`products(search:)` to find one thing), build the basket (`basketAdd`, `basketSet`, `basketRemove`, `setTable`), \
+`products(search:)` to find one thing, `categories` and `products(category:)` for the pub's own menu sections), build the basket (`basketAdd`, `basketSet`, `basketRemove`, `setTable`), \
 then `quote`, which prices it at the till and changes nothing. Show the user the lines, table and total. \"4 pints \
 of Abbot to table 4\" is a search, one `basketAdd(pub:, table: 4, productId:, portion: \"Pint\", quantity: 4)` and a \
 `quote`.\n\n\
@@ -56,6 +56,9 @@ the user and do nothing else until they answer.\n\n\
 Never guess a table: a drink is carried to whichever table is given. Ask when the user hasn't said one in this \
 conversation, and check again if they may have moved. A garden or another part of the pub can have its own menu and \
 prices, so read the menu for the table.\n\n\
+Search forgives what dictation mangles: pass what the user said (\"broccoli barge\", \"sumo\", \"a mocktail\", \
+\"alcohol free lager\") rather than guessing names; results come best first, and `closeMatches` says when none \
+had every word, so say they're the nearest. Page long lists with `first` and `after`.\n\n\
 The basket belongs to this conversation, and the server keeps no history between conversations, so take the pub, \
 table and usual order from this one. For \"another\" or \"same again\", `basketFromQuote` with the last quote \
 (`quotes` lists this conversation's), check the table still stands, then `quote`.\n\n\
