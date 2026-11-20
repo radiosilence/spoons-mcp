@@ -146,7 +146,7 @@ enum ConfirmAction {
 	"""
 	PREVIEW
 	"""
-	Do it, with the token from PREVIEW and the same arguments. Only on the user's explicit yes.
+	Do it, with the token from PREVIEW and the same arguments. Only on the user's own say-so.
 	"""
 	CONFIRM
 }
@@ -378,7 +378,7 @@ type Money {
 
 """
 Changes. The basket's are this conversation's own; `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then
-CONFIRM, and CONFIRM only on the user's explicit yes.
+CONFIRM, and CONFIRM only on the user's own say-so.
 """
 type MutationRoot {
 	"""
@@ -448,9 +448,10 @@ type MutationRoot {
 	): BasketResult!
 	"""
 	Prices an order at the pub's till for a table, from `items` or else from the basket. Changes nothing at
-	the pub. Show the user the lines, total and table, then on their yes preview and confirm `pay`. A table
-	is required: ask the user rather than guess. Requests: the table list, the menu if not read today, and the
-	till.
+	the pub. Show the user the lines, total and table, then preview and confirm `pay` on their yes, or straight
+	away when they asked to pay with the order. The pub and table default to the conversation's (the last ones
+	set or quoted, unless the basket holds things at another pub), which a quote remembers; with none yet, ask the user for the table rather than make one up.
+	Requests: the table list, the menu if not read today, and the till.
 	"""
 	quote(
 		"""
@@ -458,7 +459,7 @@ type MutationRoot {
 		"""
 		pub: Int,
 		"""
-		The user's table; the basket's when not given.
+		The user's table; the conversation's when not given, which is the right one unless they've said they moved.
 		"""
 		table: Int,
 		"""
@@ -467,8 +468,9 @@ type MutationRoot {
 		items: [QuoteItemInput!]
 	): QuoteResult!
 	"""
-	Pays for a quote: PREVIEW, show the user the preview, and only on their explicit yes CONFIRM with the
-	token. With a saved card CONFIRM enters it and reports how the payment went; otherwise it returns the
+	Pays for a quote: PREVIEW, then CONFIRM with the token on the user's say-so: their yes to the quote, or
+	"and pay" given with the order, in which case quote, preview and confirm in one go and still show them the
+	lines, table and total. With a saved card CONFIRM enters it and reports how the payment went; otherwise it returns the
 	payment page, where the user enters their card. The bank may ask the user to approve in their banking app:
 	follow with `order(quoteId, waitSecs)`. Never starts a second payment for one quote, and never enters the
 	card twice. `confirmDuplicate` only after the user has said they want a repeat of a recent order.

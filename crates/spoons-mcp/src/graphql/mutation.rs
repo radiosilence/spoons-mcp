@@ -3,7 +3,7 @@
 //! Basket changes are this conversation's own and reach nothing outside the server. `quote` prices at the till and
 //! changes nothing at the pub. `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then CONFIRM: PREVIEW returns
 //! what would happen and a token, and CONFIRM needs that token with the same arguments, which only the user's
-//! explicit yes should send.
+//! say-so should send: a yes to the preview, or, for `pay`, "and pay" given with the order.
 
 use std::sync::Arc;
 
@@ -231,7 +231,7 @@ fn same_pub(basket: &Basket, pub_ref: &PubRef) -> bool {
 }
 
 /// Changes. The basket's are this conversation's own; `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then
-/// CONFIRM, and CONFIRM only on the user's explicit yes.
+/// CONFIRM, and CONFIRM only on the user's own say-so.
 #[Object]
 impl MutationRoot {
     /// Adds a product to this conversation's basket, priced from the basket's table's menu. Adding the same size
@@ -505,16 +505,20 @@ impl MutationRoot {
     }
 
     /// Prices an order at the pub's till for a table, from `items` or else from the basket. Changes nothing at
-    /// the pub. Show the user the lines, total and table, then on their yes preview and confirm `pay`. A table
-    /// is required: ask the user rather than guess. Requests: the table list, the menu if not read today, and the
-    /// till.
+    /// the pub. Show the user the lines, total and table, then preview and confirm `pay` on their yes, or straight
+    /// away when they asked to pay with the order. The pub and table default to the conversation's (the last ones
+    /// set or quoted, unless the basket holds things at another pub), which a quote remembers; with none yet, ask the user for the table rather than make one up.
+    /// Requests: the table list, the menu if not read today, and the till.
     async fn quote(
         &self,
         ctx: &Context<'_>,
         #[graphql(name = "pub", desc = "The pub's ref; the basket's when not given.")] pub_: Option<
             i64,
         >,
-        #[graphql(desc = "The user's table; the basket's when not given.")] table: Option<i32>,
+        #[graphql(
+            desc = "The user's table; the conversation's when not given, which is the right one unless they've said they moved."
+        )]
+        table: Option<i32>,
         #[graphql(desc = "What to quote; the basket when not given.")] items: Option<
             Vec<QuoteItemInput>,
         >,
@@ -568,6 +572,7 @@ impl MutationRoot {
             let device = service.device_id()?;
             let order = service.quote(&pub_ref, table, &wanted, &device).await?;
             session.remember_quote(&order.quote_id);
+            remember_place(service, session, &pub_ref, table, basket.version).await;
             Ok(order)
         }
         .await;
@@ -585,8 +590,9 @@ impl MutationRoot {
         }
     }
 
-    /// Pays for a quote: PREVIEW, show the user the preview, and only on their explicit yes CONFIRM with the
-    /// token. With a saved card CONFIRM enters it and reports how the payment went; otherwise it returns the
+    /// Pays for a quote: PREVIEW, then CONFIRM with the token on the user's say-so: their yes to the quote, or
+    /// "and pay" given with the order, in which case quote, preview and confirm in one go and still show them the
+    /// lines, table and total. With a saved card CONFIRM enters it and reports how the payment went; otherwise it returns the
     /// payment page, where the user enters their card. The bank may ask the user to approve in their banking app:
     /// follow with `order(quoteId, waitSecs)`. Never starts a second payment for one quote, and never enters the
     /// card twice. `confirmDuplicate` only after the user has said they want a repeat of a recent order.
@@ -673,7 +679,7 @@ impl MutationRoot {
                     card: None,
                     question: None,
                     next: Some(
-                        "Show the user this preview and wait for their explicit yes before CONFIRM.".to_owned(),
+                        "CONFIRM on the user's say-so: their yes to this, or \"and pay\" given with the order. Either way, show them the lines, table and total.".to_owned(),
                     ),
                     error: None,
                 }
@@ -874,4 +880,44 @@ where
             }
         }
     }
+}
+
+/// Keeps a quote's pub and table as the conversation's, so the next order goes to the same table without asking.
+/// A basket of things at another pub is left as it is, and so is one that changed while the till answered (a
+/// `setTable` meanwhile is newer than this quote). Best effort: the menu is already read for this table.
+async fn remember_place(
+    service: &Service,
+    session: &Session,
+    pub_ref: &PubRef,
+    table: u32,
+    seen: u64,
+) {
+    let basket = session.basket();
+    if basket.version != seen {
+        return;
+    }
+    if same_pub(&basket, pub_ref) && basket.table == Some(table) {
+        return;
+    }
+    if !basket.items.is_empty() && !same_pub(&basket, pub_ref) {
+        return;
+    }
+    let Ok((area, catalogue)) = catalogue_for(service, pub_ref, Some(table)).await else {
+        return;
+    };
+    let _ = session.change(|basket| {
+        if basket.version != seen {
+            return Ok(());
+        }
+        if !same_pub(basket, pub_ref) {
+            if !basket.items.is_empty() {
+                return Ok(());
+            }
+            basket.pub_ref = Some(pub_ref.clone());
+        }
+        basket.table = Some(table);
+        basket.sales_area = Some(area);
+        reprice(basket, &catalogue, Some(table));
+        Ok(())
+    });
 }

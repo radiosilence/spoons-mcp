@@ -67,8 +67,8 @@ impl TokenStore {
         parts: &[&str],
     ) -> Result<(), &'static str> {
         let token = token.ok_or(
-            "CONFIRM needs the confirmationToken from a PREVIEW of the same call. Preview first, show the user, \
-             and confirm only on their explicit yes.",
+            "CONFIRM needs the confirmationToken from a PREVIEW of the same call. Preview first, and confirm only \
+             on the user's say-so: their yes, or for `pay`, \"and pay\" given with the order.",
         )?;
         let invalid =
             "That confirmationToken is unknown or already used. PREVIEW again and show the user.";
