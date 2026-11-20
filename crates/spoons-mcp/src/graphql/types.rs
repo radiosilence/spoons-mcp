@@ -224,12 +224,14 @@ impl Pub {
         currency_of(&self.venue.address.country.code)
     }
 
-    async fn detail(&self, ctx: &Context<'_>) -> Result<spoons_api_client::Venue> {
+    /// The pub's details, or `None` when they couldn't be read: the fields built on them are then null, and the
+    /// rest of a list still answers.
+    async fn detail(&self, ctx: &Context<'_>) -> Option<spoons_api_client::Venue> {
         loader(ctx)
             .load_one(VenueKey(self.venue.venue_ref))
             .await
-            .map_err(gql)?
-            .ok_or_else(|| gql("the pub's details didn't load"))
+            .ok()
+            .flatten()
     }
 }
 
@@ -324,11 +326,11 @@ impl Pub {
     /// Today's opening hours. One request per pub, shared with `facilities`, `openNow`, `canOrder` and
     /// `salesAreas`.
     async fn hours_today(&self, ctx: &Context<'_>) -> Result<Option<OpeningHours>> {
-        Ok(today_hours(&self.detail(ctx).await?))
+        Ok(self.detail(ctx).await.as_ref().and_then(today_hours))
     }
     /// Open at this moment, by today's hours in London. Same request as `hoursToday`.
     async fn open_now(&self, ctx: &Context<'_>) -> Result<Option<bool>> {
-        let Some(hours) = today_hours(&self.detail(ctx).await?) else {
+        let Some(hours) = self.detail(ctx).await.as_ref().and_then(today_hours) else {
             return Ok(None);
         };
         if hours.closed || self.venue.status != "open" {
@@ -350,37 +352,37 @@ impl Pub {
         }))
     }
     /// Takes orders through the app. Same request as `hoursToday`.
-    async fn can_order(&self, ctx: &Context<'_>) -> Result<bool> {
-        Ok(self.detail(ctx).await?.can_place_order)
+    async fn can_order(&self, ctx: &Context<'_>) -> Option<bool> {
+        self.detail(ctx).await.map(|d| d.can_place_order)
     }
     /// `Step-free access`, `Wi-Fi` and so on. Same request as `hoursToday`.
-    async fn facilities(&self, ctx: &Context<'_>) -> Result<Vec<String>> {
-        Ok(self.detail(ctx).await?.facilities)
+    async fn facilities(&self, ctx: &Context<'_>) -> Option<Vec<String>> {
+        self.detail(ctx).await.map(|d| d.facilities)
     }
     /// The parts of the pub with their own menus. Same request as `hoursToday`.
-    async fn sales_areas(&self, ctx: &Context<'_>) -> Result<Vec<SalesArea>> {
-        Ok(self
-            .detail(ctx)
-            .await?
-            .sales_areas
-            .into_iter()
-            .map(|a| SalesArea {
-                id: a.id as i64,
-                name: a.name,
-            })
-            .collect())
+    async fn sales_areas(&self, ctx: &Context<'_>) -> Option<Vec<SalesArea>> {
+        self.detail(ctx).await.map(|d| {
+            d.sales_areas
+                .into_iter()
+                .map(|a| SalesArea {
+                    id: a.id as i64,
+                    name: a.name,
+                })
+                .collect()
+        })
     }
-    /// How long food and drink are taking now. One request, live.
-    async fn wait_times(&self, ctx: &Context<'_>) -> Result<Option<WaitTimes>> {
-        Ok(loader(ctx)
+    /// How long food and drink are taking now. One request, live; null when the pub doesn't say.
+    async fn wait_times(&self, ctx: &Context<'_>) -> Option<WaitTimes> {
+        loader(ctx)
             .load_one(WaitKey(self.venue.venue_ref))
             .await
-            .map_err(gql)?
+            .ok()
+            .flatten()
             .map(|w| WaitTimes {
                 food_minutes: w.food.map(|m| m as i32),
                 drink_minutes: w.drink.map(|m| m as i32),
                 updated_at: w.updated_at,
-            }))
+            })
     }
     /// The real ales on now and those coming soon, with their styles and colours. One request.
     async fn ales(&self, ctx: &Context<'_>) -> Result<Vec<Ale>> {

@@ -744,3 +744,30 @@ async fn now_costs_nothing() {
     assert!(data["now"]["iso"].as_str().unwrap().contains('T'));
     assert!(h.server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn one_pub_failing_doesnt_fail_the_list() {
+    let h = harness().await;
+    // Only The Watch House has details in the fixtures; the others 404.
+    let response = h
+        .spoons
+        .execute(
+            caller(),
+            "{ pubs(first: 6) { nodes { ref openNow waitTimes { drinkMinutes } } } }",
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    let nodes = data["pubs"]["nodes"].as_array().unwrap();
+    let watch_house = nodes.iter().find(|n| n["ref"] == 254).unwrap();
+    assert!(watch_house["openNow"].is_boolean());
+    assert!(watch_house["waitTimes"]["drinkMinutes"].is_number());
+    assert!(
+        nodes
+            .iter()
+            .filter(|n| n["ref"] != 254)
+            .all(|n| n["openNow"].is_null())
+    );
+}

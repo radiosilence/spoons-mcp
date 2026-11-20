@@ -761,17 +761,17 @@ type Pub {
 	"""
 	Takes orders through the app. Same request as `hoursToday`.
 	"""
-	canOrder: Boolean!
+	canOrder: Boolean
 	"""
 	`Step-free access`, `Wi-Fi` and so on. Same request as `hoursToday`.
 	"""
-	facilities: [String!]!
+	facilities: [String!]
 	"""
 	The parts of the pub with their own menus. Same request as `hoursToday`.
 	"""
-	salesAreas: [SalesArea!]!
+	salesAreas: [SalesArea!]
 	"""
-	How long food and drink are taking now. One request, live.
+	How long food and drink are taking now. One request, live; null when the pub doesn't say.
 	"""
 	waitTimes: WaitTimes
 	"""

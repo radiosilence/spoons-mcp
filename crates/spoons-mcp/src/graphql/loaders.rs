@@ -47,10 +47,25 @@ macro_rules! per_pub {
                         .map(|value| (*key, value))
                 }))
                 .await;
-                loaded
-                    .into_iter()
-                    .collect::<Result<HashMap<_, _>, String>>()
-                    .map_err(Arc::new)
+                // One pub failing leaves its fields null rather than failing every pub in the list; only when
+                // nothing loaded is it an error.
+                let mut found = HashMap::new();
+                let mut first_error = None;
+                for result in loaded {
+                    match result {
+                        Ok((key, value)) => {
+                            found.insert(key, value);
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "couldn't load part of a pub");
+                            first_error.get_or_insert(error);
+                        }
+                    }
+                }
+                match first_error {
+                    Some(error) if found.is_empty() && keys.len() == 1 => Err(Arc::new(error)),
+                    _ => Ok(found),
+                }
             }
         }
     };
