@@ -39,6 +39,7 @@ pub struct Service {
     /// One fetch of a sales area's menu at a time, so a query that asks for it twice reads it once.
     fetching: Mutex<HashMap<AreaKey, Arc<tokio::sync::Mutex<()>>>>,
     pub tokens: crate::tokens::TokenStore,
+    pub sessions: crate::session::Registry,
     /// Wait between polls of a payment; shortened in tests.
     poll: Duration,
     settle: Duration,
@@ -133,6 +134,7 @@ impl Service {
             menus: Mutex::default(),
             fetching: Mutex::default(),
             tokens: crate::tokens::TokenStore::default(),
+            sessions: crate::session::Registry::default(),
             poll: POLL,
             settle: SETTLE,
         }

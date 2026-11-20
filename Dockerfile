@@ -1,7 +1,8 @@
 # spoons as a container: the MCP server over HTTP, for running behind mcp-gateway, which authenticates callers and
 # injects each user's receipt address as the X-Spoons-Email header.
 #
-# No build stage: CI builds the static musl binaries and this image only copies them in. The build context is
+# No build stage: CI builds the static musl binaries and this image only copies them in. The MCP App's page is inside
+# the binary. The build context is
 # dist/, holding <arch>/spoons for amd64 and arm64 (the release tarballs, unpacked) and an empty state/, so
 # building by hand needs `docker build -f Dockerfile dist` with those in place.
 

@@ -15,6 +15,7 @@ mod service;
 mod session;
 mod tiers;
 mod tokens;
+mod ui;
 
 #[derive(Parser)]
 #[command(version, about)]

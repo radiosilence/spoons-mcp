@@ -815,6 +815,7 @@ pub struct BasketLine {
     pub portion: String,
     pub quantity: i32,
     pub kind: Kind,
+    pub colour: Option<Colour>,
     /// One of it, at the menu's price for the basket's table.
     pub unit_price: Option<Money>,
     pub line_total: Option<Money>,
@@ -886,6 +887,7 @@ impl Basket {
                 portion: i.portion.clone(),
                 quantity: i.quantity as i32,
                 kind: i.kind,
+                colour: i.colour.as_ref().map(Colour::from),
                 unit_price: i.unit_price.map(|p| Money::new(p, currency)),
                 line_total: i
                     .unit_price

@@ -78,6 +78,27 @@ mutation { pay(quoteId: "d44e019b7a8e", action: PREVIEW) { preview confirmationT
 mutation { pay(quoteId: "d44e019b7a8e", action: CONFIRM, confirmationToken: "…") { status paymentPage card question next } }
 ```
 
+### The app
+
+Hosts that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps) (Claude, ChatGPT, VS Code, Goose)
+show a Wetherspoon's app beside `spoons` results: a pub picker, the menu (kind tabs, an instant filter, the guest
+ales picked out with their colour, strength and notes, sizes and prices to tap), the basket with the table big and
+editable, the quote with any till-versus-menu difference, and the order as it goes through. The conversation stays the
+interface; the app is an extra, and every result reads on its own as text.
+
+The tool links to `ui://spoons/app.html` (`text/html;profile=mcp-app`, with a CSP that allows no network at all), and
+each result carries `structuredContent`: the GraphQL response plus the screen that fits it, worked out from the
+operation. The model can steer it with the tool's `ui` argument (`view`, `focus`, `highlight`). The app reads and
+changes things only through the same `spoons` tool and GraphQL, tells the model what the user did there
+(`ui/update-model-context`), watches the basket so the model's changes show up, and can post "quote ready, pay?" into
+the chat. It never sends a CONFIRM: paying stays in the conversation.
+
+The app is Preact and the official `@modelcontextprotocol/ext-apps` SDK in `crates/spoons-mcp/app`, built by Vite into
+one inlined file, `crates/spoons-mcp/assets/app.html`, which the binary embeds. That file is committed, so building
+the server needs no Node; `just app` rebuilds it, and CI fails a change where it's stale. `just app-e2e` drives it in
+the ext-apps reference host against fixtures, with screenshots, never reaching the live API. `SPOONS_APP_HTML` makes
+the server read the page from a file on every request, for working on it.
+
 `spoons mcp --http 0.0.0.0:8080` serves the same tools over streamable HTTP at `/mcp`, which is how the image runs.
 Each request's `X-Spoons-Email` header gives its receipt address, and `SPOONS_EMAIL` is ignored: the server is
 shared, so a gateway in front injects each user's own, and `pay` returns the payment page as a link instead of

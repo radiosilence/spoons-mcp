@@ -78,6 +78,7 @@ type BasketLine {
 	portion: String!
 	quantity: Int!
 	kind: Kind!
+	colour: Colour
 	"""
 	One of it, at the menu's price for the basket's table.
 	"""

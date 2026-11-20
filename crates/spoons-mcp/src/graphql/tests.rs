@@ -772,6 +772,75 @@ async fn one_pub_failing_doesnt_fail_the_list() {
     );
 }
 
+/// A tool result's text, parsed.
+fn answer(result: &rmcp::model::CallToolResult) -> Value {
+    let block = serde_json::to_value(&result.content[0]).unwrap();
+    serde_json::from_str(block["text"].as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn a_tool_result_carries_the_screen_for_the_app() {
+    let h = harness().await;
+    let request: crate::mcp::GraphqlRequest = serde_json::from_value(json!({
+        "query": "query($t: Int) { pub(ref: 254) { menu(table: $t, search: \"ale\") { totalCount } } }",
+        "variables": "{\"t\": 4}",
+        "ui": { "view": "FULL", "focus": "CASK_ALE" },
+    }))
+    .unwrap();
+    let result = h.spoons.run_tool(caller(), &request).await;
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        structured["view"],
+        json!({ "screen": "menu", "pub": 254, "table": 4, "search": "ale" })
+    );
+    assert_eq!(structured["ui"]["focus"], "CASK_ALE");
+    // The response itself is the text, for the model and hosts without the app; it isn't sent twice.
+    assert!(structured.get("data").is_none());
+    assert!(
+        answer(&result)["data"]["pub"]["menu"]["totalCount"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[tokio::test]
+async fn the_app_reaches_its_conversations_basket_and_no_one_elses() {
+    let h = harness().await;
+    let call = |query: &str, session: Option<&str>| -> crate::mcp::GraphqlRequest {
+        serde_json::from_value(
+            json!({ "query": query, "ui": { "view": "NONE", "session": session } }),
+        )
+        .unwrap()
+    };
+    let add = format!("mutation {{ basketAdd(pub: 254, productId: \"{ABBOT}\") {{ success }} }}");
+    let model = h.spoons.run_tool(caller(), &call(&add, None)).await;
+    let session = model.structured_content.unwrap()["session"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // The host gave the app a session of its own; naming the conversation's reaches its basket.
+    let app = h.spoons.for_new_session();
+    let seen = app
+        .run_tool(caller(), &call("{ basket { count } }", Some(&session)))
+        .await;
+    assert_eq!(
+        seen.structured_content.as_ref().unwrap()["view"],
+        Value::Null,
+        "the app's own calls draw nothing"
+    );
+    assert_eq!(answer(&seen)["data"]["basket"]["count"], 1);
+    // Someone else can't, even knowing the id.
+    let stranger = Caller {
+        email: Some("someone@else.com".into()),
+        card: Ok(None),
+    };
+    let theirs = app
+        .run_tool(stranger, &call("{ basket { count } }", Some(&session)))
+        .await;
+    assert_eq!(answer(&theirs)["data"]["basket"]["count"], 0);
+}
+
 #[tokio::test]
 async fn quotes_items_by_a_sizes_name_as_well_as_its_label() {
     let h = harness().await;
