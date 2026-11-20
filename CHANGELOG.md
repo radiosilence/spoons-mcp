@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.6
+
+### Changed
+
+- **Tidier on a phone.** The quote card drops the ruled-paper lines and the payment preview written for Claude, and its button reads "Confirm payment · £x" on one line; Claude is asked to show one card per request (the menu, the quote, the order) rather than one for every step.
+
 ## 0.5.5
 
 ### Fixed
