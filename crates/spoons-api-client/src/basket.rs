@@ -58,7 +58,10 @@ impl Serialize for BasketLine {
 }
 
 /// A size's label, matched without regard to case, or the default size when `None`.
-pub fn find_portion<'a>(product: &'a Product, portion: Option<&str>) -> Result<&'a PortionOption, LineError> {
+pub fn find_portion<'a>(
+    product: &'a Product,
+    portion: Option<&str>,
+) -> Result<&'a PortionOption, LineError> {
     let options = product
         .options
         .portion
@@ -85,13 +88,20 @@ pub fn find_portion<'a>(product: &'a Product, portion: Option<&str>) -> Result<&
 }
 
 /// The choice groups a size asks for, in the menu's order, with whether each is required.
-pub fn groups_for<'a>(product: &'a Product, portion: &PortionOption) -> Vec<(&'a ChoiceGroup, bool)> {
+pub fn groups_for<'a>(
+    product: &'a Product,
+    portion: &PortionOption,
+) -> Vec<(&'a ChoiceGroup, bool)> {
     product
         .options
         .choices
         .iter()
         .filter_map(|group| {
-            let asked = portion.value.choices.iter().find(|c| c.choice_id == group.id)?;
+            let asked = portion
+                .value
+                .choices
+                .iter()
+                .find(|c| c.choice_id == group.id)?;
             Some((group, asked.required || group.required))
         })
         .collect()
@@ -185,14 +195,16 @@ impl BasketLine {
                 }
                 continue;
             };
-            let option = group.options.iter().find(|o| o.id == *option_id).ok_or_else(|| {
-                LineError::NoSuchChoice {
+            let option = group
+                .options
+                .iter()
+                .find(|o| o.id == *option_id)
+                .ok_or_else(|| LineError::NoSuchChoice {
                     product: product.name.clone(),
                     group: group.title().to_owned(),
                     option: *option_id,
                     options: describe(group),
-                }
-            })?;
+                })?;
             if option.is_out_of_stock {
                 return Err(LineError::ChoiceOutOfStock {
                     product: product.name.clone(),
@@ -333,7 +345,10 @@ mod tests {
         assert_eq!(choice["category"], json!({ "id": 400260 }));
         assert_eq!(choice["course"], json!({ "id": 3 }));
         assert_eq!(choice["portion"], json!({ "id": 1 }));
-        assert_eq!(choice["checkout"], json!({ "id": 32, "name": "LEMONADE", "displayRecordId": 100, "choiceId": 10000001149_u64 }));
+        assert_eq!(
+            choice["checkout"],
+            json!({ "id": 32, "name": "LEMONADE", "displayRecordId": 100, "choiceId": 10000001149_u64 })
+        );
     }
 
     #[test]
