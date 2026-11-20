@@ -54,3 +54,7 @@ export const SET_TABLE = `mutation($table: Int!, $pub: Int) { setTable(table: $t
 export const CLEAR = `mutation { basketClear { ${RESULT} } }`;
 
 export const MAKE_QUOTE = `mutation { quote { success error quote { ${QUOTE_FIELDS} } } }`;
+
+/** The server's forgiving, ranked search, for what the instant filter can't place. */
+export const SEARCH = `query($ref: Int!, $table: Int, $s: String) { pub(ref: $ref) {
+  menu(table: $table) { products(search: $s, first: 12) { closeMatches nodes { ${PRODUCT} } } } } }`;
