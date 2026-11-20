@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+
+- **Smoother on a phone.** The quote's button is now the acceptance: "Confirm payment" with the total and table, and one tap pays, instead of asking in the chat. `ui` hints are read whether they come as an object or, as models often send them, a JSON string, instead of failing the call; and the `spoons` tool is no longer marked destructive, so hosts stop asking permission before every menu lookup. Paying in the chat still goes through PREVIEW and CONFIRM on the user's say-so.
+
+### Internal
+
+- **The Mac build no longer holds anything up.** It builds in its own job that neither Checks, the image nor the GitHub release waits on, and is attached to the release once built.
+
 ## 0.5.0
 
 ### Added
