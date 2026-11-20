@@ -56,7 +56,7 @@ pub struct PubRef {
 }
 
 pub fn london_today() -> jiff::civil::Date {
-    jiff::Timestamp::now().to_zoned(london()).date()
+    jiff::Timestamp::now().to_zoned_datetime(london()).date()
 }
 
 pub fn london() -> jiff::tz::TimeZone {

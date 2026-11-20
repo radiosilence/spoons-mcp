@@ -28,7 +28,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 regex.workspace = true
-jiff = { version = "0.2.39", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff = { version = "1.0.0", default-features = false, features = ["std", "tzdb-bundle-always"] }
 
 [dev-dependencies]
 wiremock = "0.6"
