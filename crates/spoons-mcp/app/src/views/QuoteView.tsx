@@ -77,6 +77,11 @@ export function QuoteView({
           <h2 id="quote-title" class="quote-total">
             {quote.total.formatted}
           </h2>
+          {quote.savings && (
+            <p class="small saved">
+              <Icon name="star" size={14} /> Deals took off {quote.savings.formatted}
+            </p>
+          )}
           {quote.differsFromMenu && quote.menuTotal && (
             <p class="small differs">
               Menu said <s>{quote.menuTotal.formatted}</s>; the till’s price is what’s charged.
@@ -100,8 +105,8 @@ export function QuoteView({
               <li key={i}>
                 <span class="q-qty">{l.quantity}×</span>
                 <span class="q-name">
-                  {l.name}
-                  <span class="muted small"> · {l.portion.replace(/\s*\(.*\)/, "")}</span>
+                  {l.description}
+                  {l.deal && <span class="tag deal">{l.deal}</span>}
                 </span>
                 <span class="q-price">
                   {differs && each && <s class="muted small">{(menuLine as number).toFixed(2)}</s>} {till?.formatted ?? "—"}

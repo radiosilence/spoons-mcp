@@ -213,6 +213,27 @@ async function lastResultText(page) {
   check(true, "searching \"mocktail\" in the app finds the 0% cocktails");
   await menu.app.fill(".search input", "");
 
+  // A product that asks a question opens a sheet: fish and chips asks about peas, and comes with a drink.
+  await menu.app.fill(".search input", "fish and chips");
+  await menu.app.waitForSelector("text=Small freshly battered fish and chips", { timeout: 15000 });
+  await menu.app.click("#p-10000162183 .portion");
+  await menu.app.waitForSelector(".sheet .choice-group", { timeout: 15000 });
+  await sleep(400);
+  await menu.outer?.screenshot?.({ path: join(out, "sheet-380-light.png") });
+  await menu.app.click(".sheet >> text=Mushy Peas");
+  await menu.app.click(".sheet .choice.drink >> text=Guinness");
+  await sleep(300);
+  await menu.outer.screenshot({ path: join(out, "sheet-picked-380-light.png"), animations: "disabled" });
+  await menu.app.click(".sheet-foot .primary");
+  await first.app.waitForFunction(
+    () => [...document.querySelectorAll(".line")].some((l) => l.textContent.includes("Mushy Peas"))
+      && [...document.querySelectorAll(".line")].some((l) => l.textContent.includes("With the meal deal")),
+    null,
+    { timeout: 25000 },
+  );
+  check(true, "the options sheet adds fish and chips with mushy peas and a Guinness from the meal deal");
+  await menu.app.fill(".search input", "");
+
   // The app quotes and asks in the chat; it has no way to confirm.
   await menu.app.click(".basket-bar");
   await settle(menu.app, ".basket-foot");

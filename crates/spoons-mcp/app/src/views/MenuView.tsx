@@ -4,6 +4,7 @@ import * as Q from "../queries";
 import { add, go, useStore } from "../store";
 import type { Hints, Kind, Menu, Portion, Product, PubCard, Section, View } from "../types";
 import { Abv, Glass, Icon, Pouring } from "../ui";
+import { OptionSheet } from "./OptionSheet";
 
 type MenuViewT = Extract<View, { screen: "menu" }>;
 
@@ -36,6 +37,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
   const [active, setActive] = useState<Kind | null>(null);
   const [afOnly, setAfOnly] = useState(false);
   const [showFood, setShowFood] = useState(false);
+  const [asking, setAsking] = useState<{ product: Product; portion: Portion } | null>(null);
   const [fullscreen, setFullscreen] = useState(app.getHostContext()?.displayMode === "fullscreen");
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -126,7 +128,14 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
     requestAnimationFrame(() => document.getElementById(`k-${kind}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
 
-  const order = (p: Product, portion: Portion) => void add(view.pub, p, portion);
+  // Something that asks a question first (a mixer, a side), or a meal that comes with a drink, opens the sheet.
+  const order = (p: Product, portion: Portion) => {
+    if (p.needsChoices || p.deals.some((d) => d.kind === "INCLUDES_DRINK")) setAsking({ product: p, portion });
+    else void add(view.pub, p, portion);
+  };
+  const sheet = asking && (
+    <OptionSheet pub={view.pub} table={table} product={asking.product} portion={asking.portion} onClose={() => setAsking(null)} />
+  );
 
   // On a phone the host clips an inline app and gives vertical swipes to the chat, so a scrolling menu belongs in
   // fullscreen; inline it's the short card.
@@ -148,6 +157,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
           See the whole menu · {data.menu.totalCount} things
         </button>
         <BasketBar />
+        {sheet}
       </div>
     );
   }
@@ -241,6 +251,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
         )}
       </div>
       <BasketBar />
+      {sheet}
     </div>
   );
 }
@@ -335,6 +346,8 @@ function ProductRow({ p, onAdd, busy, count, lit }: RowProps) {
           <Abv abv={p.abv} units={p.units} />
           {p.origin && <span class="muted small">{p.origin}</span>}
           {p.vegan && <span class="tag">vegan</span>}
+          {p.deals.some((d) => d.kind === "INCLUDES_DRINK") && <span class="tag deal">+ drink deal</span>}
+          {p.needsChoices && <span class="tag">choose options</span>}
         </div>
         {p.tasteNotes.length > 0 && <div class="notes">{p.tasteNotes.join(" · ")}</div>}
         {off ? <div class="why-not">{p.whyNot}</div> : <Portions p={p} onAdd={onAdd} busy={busy} />}

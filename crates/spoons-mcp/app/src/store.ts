@@ -4,7 +4,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { gql, say, tellModel } from "./bridge";
 import * as Q from "./queries";
-import type { Basket, Hints, Portion, Product, Quote, View } from "./types";
+import type { Basket, Hints, OptionPick, Portion, Product, Quote, View } from "./types";
 
 export interface State {
   /** What the latest tool result asked to show; `null` shows nothing. */
@@ -96,11 +96,30 @@ async function change(op: string, variables: Record<string, unknown>, said: (b: 
   }
 }
 
-export async function add(pub: number, product: Product, portion: Portion) {
-  const ok = await change(Q.ADD, { pub, product: product.id, portion: portion.name }, () =>
-    `added 1 × ${product.name} (${portion.name}).`,
+/** What a product needs before it's added: answers to its questions, and a meal's drink. */
+export interface Extras {
+  options?: OptionPick[];
+  /** Read back to the user: "Chips, Mushy peas". */
+  said?: string[];
+  drink?: { productId: string; portion?: string; name: string };
+}
+
+export async function add(pub: number, product: Product, portion: Portion, extras: Extras = {}) {
+  const with_ = [portion.name, ...(extras.said ?? [])].join(", ");
+  const drink = extras.drink ? ` with ${extras.drink.name}` : "";
+  const ok = await change(
+    Q.ADD,
+    {
+      pub,
+      product: product.id,
+      portion: portion.name,
+      options: extras.options?.length ? extras.options : null,
+      drink: extras.drink ? { productId: extras.drink.productId, portion: extras.drink.portion ?? null } : null,
+    },
+    () => `added 1 × ${product.name} (${with_})${drink}.`,
   );
-  if (ok) toast(`${product.shortName} · ${portion.name} added`);
+  if (ok) toast(`${product.shortName} added${drink}`);
+  return ok;
 }
 
 export async function setQuantity(lineId: string, name: string, quantity: number) {

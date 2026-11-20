@@ -48,6 +48,23 @@ export interface Product {
   orderable: boolean;
   whyNot: string | null;
   vegan: boolean;
+  /** Asks a question (a mixer, a side) before it can be ordered. */
+  needsChoices: boolean;
+  deals: { kind: "INCLUDES_DRINK" | "MULTI_BUY" | "OTHER" }[];
+}
+
+export interface OptionGroup {
+  id: string;
+  name: string;
+  required: boolean;
+  sizes: string[];
+  options: { id: string; label: string; price: Money; available: boolean }[];
+}
+
+/** One question's answer, as `basketAdd` takes it. */
+export interface OptionPick {
+  group: string;
+  options: string[];
 }
 
 export interface Section {
@@ -90,6 +107,8 @@ export interface BasketLine {
   name: string;
   portion: string;
   quantity: number;
+  options: string[];
+  includedWith: string | null;
   kind: Kind;
   colour: Colour | null;
   unitPrice: Money | null;
@@ -125,6 +144,8 @@ export interface QuoteLine {
   name: string;
   portion: string;
   quantity: number;
+  description: string;
+  deal: string | null;
   tillPrice: Money | null;
   menuPrice: Money | null;
 }
@@ -136,6 +157,7 @@ export interface Quote {
   table: number;
   total: Money;
   menuTotal: Money | null;
+  savings: Money | null;
   differsFromMenu: boolean;
   status: OrderStatus;
   summary: string;
