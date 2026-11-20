@@ -83,6 +83,9 @@ pub struct LatLngInput {
 pub struct CountFields {
     /// How many match, before paging.
     pub total_count: u64,
+    /// Nothing matched every word of the search, so these are the nearest, best first. Say so rather than
+    /// presenting them as what was asked for.
+    pub close_matches: bool,
 }
 
 pub type ListConnection<T> = Connection<String, T, CountFields>;
@@ -94,6 +97,7 @@ pub fn page<T: async_graphql::OutputType>(
     first: Option<i32>,
     default: usize,
     most: usize,
+    close_matches: bool,
 ) -> Result<ListConnection<T>> {
     let total = items.len();
     let start = match after {
@@ -120,6 +124,7 @@ pub fn page<T: async_graphql::OutputType>(
         end < total,
         CountFields {
             total_count: total as u64,
+            close_matches,
         },
     );
     connection.edges.extend(
@@ -547,10 +552,22 @@ impl Menu {
         self.catalogue.entries.iter().filter(move |e| {
             self.kinds.as_deref().is_none_or(|k| k.contains(&e.kind))
                 && kinds.is_none_or(|k| k.contains(&e.kind))
-                && self.search.as_deref().is_none_or(|s| e.matches(s))
-                && search.is_none_or(|s| e.matches(s))
+                && self
+                    .search
+                    .as_deref()
+                    .is_none_or(|s| crate::search::product_matches(s, e))
+                && search.is_none_or(|s| crate::search::product_matches(s, e))
         })
     }
+}
+
+/// A category of the pub's own menu.
+#[derive(SimpleObject, Clone)]
+pub struct MenuCategory {
+    pub name: String,
+    /// The kind most of it is; the first product's.
+    pub kind: Kind,
+    pub count: u32,
 }
 
 /// One kind's products on a menu.
@@ -621,24 +638,72 @@ impl Menu {
             })
             .collect()
     }
-    /// Every matching product, in the pub's order. Cursors are product ids.
+    /// Products, in the pub's order, or with `search`, best match first. Search forgives what voice gets wrong:
+    /// misheard words ("abot"), brand styling ("sumo" finds "Mad Squirrel $umo"), and what a drink is rather than
+    /// its name ("mocktail", "virgin", "alcohol free", "beer", "soft drink"), across name, the pub's category,
+    /// kind, style, notes and description. When nothing has every word, the nearest come back with
+    /// `closeMatches`. Cursors are product ids; page with `first` and `after`. Free once the menu is read.
     #[allow(clippy::too_many_arguments)]
     async fn products(
         &self,
-        #[graphql(desc = "Only products matching every word.")] search: Option<String>,
+        #[graphql(desc = "What someone asked for, in their words.")] search: Option<String>,
         kinds: Option<Vec<Kind>>,
+        #[graphql(
+            desc = "Only the pub's own category (or group) of this name, from `categories`; forgiving."
+        )]
+        category: Option<String>,
         #[graphql(desc = "Only guest ales.", default = false)] guest_only: bool,
         #[graphql(desc = "Only what can be ordered now.", default = false)] orderable_only: bool,
         #[graphql(desc = "Page size, 50 when not given, at most 300.")] first: Option<i32>,
         after: Option<String>,
     ) -> Result<ListConnection<Product>> {
-        let items = self
-            .matching(search.as_deref(), kinds.as_deref())
+        let wanted = category.as_deref();
+        // The menu's own search ranks too, when this field has none.
+        let search = search.or_else(|| self.search.clone());
+        let filtered = self
+            .matching(None, kinds.as_deref())
             .filter(|e| !guest_only || e.guest)
             .filter(|e| !orderable_only || e.orderable())
+            .filter(|e| {
+                wanted.is_none_or(|w| {
+                    [Some(e.category.as_str()), e.group.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|c| crate::search::category_matches(w, c))
+                })
+            })
+            .collect::<Vec<&Entry>>();
+        let (entries, close): (Vec<&Entry>, bool) = match search
+            .as_deref()
+            .and_then(|s| crate::search::products(s, filtered.iter().copied()))
+        {
+            Some(ranked) => (
+                ranked.items.into_iter().map(|(_, e)| e).collect(),
+                ranked.close,
+            ),
+            None => (filtered, false),
+        };
+        let items = entries
+            .into_iter()
             .map(|e| (e.product.id.to_string(), self.wrap(e)))
             .collect();
-        page(items, after, first, 50, 300)
+        page(items, after, first, 50, 300, close)
+    }
+    /// The pub's own menu categories, as its app lists them ("0% cocktails", "Soft drinks", "Spritz cocktails"),
+    /// with each one's kind and how many products are in it. Pass a name to `products(category:)`. Free.
+    async fn categories(&self) -> Vec<MenuCategory> {
+        let mut out: Vec<MenuCategory> = Vec::new();
+        for e in self.matching(None, None) {
+            match out.iter_mut().find(|c| c.name == e.category) {
+                Some(c) => c.count += 1,
+                None => out.push(MenuCategory {
+                    name: e.category.clone(),
+                    kind: e.kind,
+                    count: 1,
+                }),
+            }
+        }
+        out
     }
     /// The guest real ales on now: the rotating casks, named "Brewery - Beer", that a search for "ale" misses.
     async fn guest_ales(&self) -> Vec<Product> {

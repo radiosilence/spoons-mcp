@@ -207,6 +207,12 @@ async function lastResultText(page) {
   await first.app.waitForFunction(() => document.querySelectorAll(".line").length === 2, null, { timeout: 25000 });
   check(true, "the app's own change shows in the other app on screen too");
 
+  // Typing what a drink is, not its name, still finds it: the server's search takes over from the instant filter.
+  await menu.app.fill(".search input", "mocktail");
+  await menu.app.waitForSelector("text=Raspberry Refresher", { timeout: 15000 });
+  check(true, "searching \"mocktail\" in the app finds the 0% cocktails");
+  await menu.app.fill(".search input", "");
+
   // The app quotes and asks in the chat; it has no way to confirm.
   await menu.app.click(".basket-bar");
   await settle(menu.app, ".basket-foot");

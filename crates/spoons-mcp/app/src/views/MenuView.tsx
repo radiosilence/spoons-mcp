@@ -10,12 +10,21 @@ type MenuViewT = Extract<View, { screen: "menu" }>;
 type Loaded = PubCard & { menu: Menu };
 
 /** What a search matches: every word, in the name, brewery, style, kind, category or notes. */
-function matches(p: Product, words: string[]): boolean {
-  const hay = [p.name, p.brewery, p.style, p.origin, p.kind.replace(/_/g, " "), ...p.tasteNotes]
-    .filter(Boolean)
-    .join(" ")
+/** As the server folds text: "$umo" is "sumo", accents and apostrophes go. */
+export function fold(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[’'`]/g, "");
+    .replace(/\$/g, "s")
+    .replace(/[’'`®™]/g, "")
+    .replace(/[^a-z0-9%.]+/g, " ")
+    .trim();
+}
+
+/** The instant filter: every word, anywhere. When it finds nothing the server's forgiving search takes over. */
+function matches(p: Product, words: string[]): boolean {
+  const hay = fold([p.name, p.brewery, p.style, p.origin, p.kind.replace(/_/g, " "), ...p.tasteNotes].filter(Boolean).join(" "));
   return words.every((w) => hay.includes(w));
 }
 
@@ -33,7 +42,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
   // The basket's table decides the prices, once there is one.
   const table = basket?.pub?.ref === view.pub && basket.table != null ? basket.table : (view.table ?? null);
 
-  const words = search.toLowerCase().replace(/[’'`]/g, "").split(/\s+/).filter(Boolean);
+  const words = fold(search).split(" ").filter(Boolean);
   const [rest, setRest] = useState<Section[] | null>(null);
   useEffect(() => {
     setError(null);
@@ -227,7 +236,9 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
             </section>
           );
         })}
-        {!sections.length && <p class="empty">Nothing matches “{search}”.</p>}
+        {!sections.length && words.length > 0 && (
+          <ServerSearch pub={view.pub} table={table} search={search} onAdd={order} busy={busy} inBasket={inBasket} />
+        )}
       </div>
       <BasketBar />
     </div>
@@ -369,5 +380,43 @@ export function BasketBar() {
       </span>
       <span class="bb-total">{basket.menuTotal?.formatted ?? ""}</span>
     </button>
+  );
+}
+
+/** What the server's search makes of words the instant filter can't place: "mocktail", "broccoli", "abot". */
+function ServerSearch(props: {
+  pub: number;
+  table: number | null;
+  search: string;
+  onAdd: (p: Product, portion: Portion) => void;
+  busy: boolean;
+  inBasket: Map<string, number>;
+}) {
+  const [found, setFound] = useState<{ close: boolean; nodes: Product[] } | null>(null);
+  useEffect(() => {
+    setFound(null);
+    const timer = setTimeout(() => {
+      gql<{ pub: { menu: { products: { closeMatches: boolean; nodes: Product[] } } } }>(Q.SEARCH, {
+        ref: props.pub,
+        table: props.table,
+        s: props.search,
+      }).then(
+        (d) => setFound({ close: d.pub.menu.products.closeMatches, nodes: d.pub.menu.products.nodes }),
+        () => setFound({ close: true, nodes: [] }),
+      );
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [props.pub, props.table, props.search]);
+  if (!found) return <Pouring label="Looking harder…" />;
+  if (!found.nodes.length) return <p class="empty">Nothing like “{props.search}” here.</p>;
+  return (
+    <section class="menu-section">
+      <h3>{found.close ? "Closest to that" : `For “${props.search}”`}</h3>
+      <ul class="rows">
+        {found.nodes.map((p) => (
+          <ProductRow key={p.id} p={p} onAdd={props.onAdd} busy={props.busy} count={props.inBasket.get(p.id)} />
+        ))}
+      </ul>
+    </section>
   );
 }

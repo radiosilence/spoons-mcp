@@ -888,3 +888,193 @@ async fn an_api_thats_down_is_an_error_not_a_list_of_empty_pubs() {
         .unwrap();
     assert!(!response.errors.is_empty());
 }
+
+// Regressions from a real session at The Brockley Barge, ordering by voice: what was said, and what it should
+// have found.
+
+async fn names(h: &Harness, search: &str) -> (Vec<String>, bool) {
+    let data = h
+        .run(
+            "query($s: String) { pub(ref: 254) { menu { products(search: $s, first: 10) { closeMatches nodes { name } } } } }",
+            json!({ "s": search }),
+        )
+        .await;
+    let products = &data["pub"]["menu"]["products"];
+    (
+        products["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["name"].as_str().unwrap().to_owned())
+            .collect(),
+        products["closeMatches"].as_bool().unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn finds_a_misheard_pub() {
+    let h = harness().await;
+    for said in [
+        "Broccoli Barge",
+        "the brockley barge spoons",
+        "barge",
+        "brockly",
+    ] {
+        let data = h
+            .run(
+                "query($q: String) { pubs(query: $q) { closeMatches nodes { ref name } } }",
+                json!({ "q": said }),
+            )
+            .await;
+        assert_eq!(data["pubs"]["nodes"][0]["ref"], 1006, "{said}: {data}");
+    }
+    // A town or a postcode still works, squashed or not.
+    let data = h
+        .run("{ pubs(query: \"se42rr\") { nodes { ref } } }", json!({}))
+        .await;
+    assert_eq!(data["pubs"]["nodes"][0]["ref"], 1006);
+}
+
+#[tokio::test]
+async fn sees_through_brand_styling() {
+    let h = harness().await;
+    let (found, close) = names(&h, "sumo").await;
+    assert_eq!(
+        found.first().map(String::as_str),
+        Some("Mad Squirrel $umo"),
+        "{found:?}"
+    );
+    assert!(!close);
+}
+
+#[tokio::test]
+async fn knows_what_a_mocktail_is() {
+    let h = harness().await;
+    for said in [
+        "mocktail",
+        "a virgin cocktail",
+        "mocktails please",
+        "something alcohol free and fruity",
+    ] {
+        let (found, _) = names(&h, said).await;
+        let top: Vec<&str> = found.iter().take(2).map(String::as_str).collect();
+        assert!(
+            top.iter().all(|n| [
+                "Raspberry Refresher",
+                "Passion Fruit Cooler",
+                "Rasp Refresher"
+            ]
+            .contains(n)),
+            "{said}: {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_cocktail_is_a_drink_before_it_is_crisps() {
+    let h = harness().await;
+    let (found, _) = names(&h, "cocktail").await;
+    let crisps = found.iter().position(|n| n.contains("crisps"));
+    assert!(crisps.is_none_or(|i| i >= 5), "{found:?}");
+    assert!(!found[0].contains("crisps"));
+}
+
+#[tokio::test]
+async fn forgives_typos_and_filler() {
+    let h = harness().await;
+    for said in ["abot", "4 pints of abbot please", "Abbot Ale"] {
+        let (found, _) = names(&h, said).await;
+        assert_eq!(
+            found.first().map(String::as_str),
+            Some("Greene King Abbot Ale"),
+            "{said}: {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn offers_the_nearest_rather_than_nothing() {
+    let h = harness().await;
+    let (found, close) = names(&h, "sunrise cocktail").await;
+    assert!(close, "nothing here is a sunrise");
+    assert!(!found.is_empty());
+}
+
+#[tokio::test]
+async fn lists_and_filters_by_the_pubs_own_categories() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "{ pub(ref: 254) { menu { categories { name kind count } \
+               zero: products(category: \"0% cocktails\") { nodes { name } } \
+               mock: products(category: \"mocktails\") { totalCount } \
+               soft: products(category: \"soft drinks\") { totalCount } } } }",
+            json!({}),
+        )
+        .await;
+    let menu = &data["pub"]["menu"];
+    let categories = menu["categories"].as_array().unwrap();
+    let zero = categories
+        .iter()
+        .find(|c| c["name"] == "0% cocktails")
+        .unwrap();
+    assert_eq!(zero["kind"], "ALCOHOL_FREE");
+    let names: Vec<&str> = menu["zero"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), zero["count"].as_u64().unwrap() as usize);
+    assert!(
+        names.contains(&"Raspberry Refresher") && names.contains(&"Passion Fruit Cooler"),
+        "{names:?}"
+    );
+    assert_eq!(menu["mock"]["totalCount"], zero["count"]);
+    assert!(menu["soft"]["totalCount"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn pages_through_the_whole_menu() {
+    let h = harness().await;
+    let mut after: Option<String> = None;
+    let mut seen = std::collections::HashSet::new();
+    let total = loop {
+        let data = h
+            .run(
+                "query($a: String) { pub(ref: 254) { menu { products(first: 40, after: $a) { totalCount \
+                   nodes { id } pageInfo { hasNextPage endCursor } } } } }",
+                json!({ "a": after }),
+            )
+            .await;
+        let page = &data["pub"]["menu"]["products"];
+        for node in page["nodes"].as_array().unwrap() {
+            assert!(
+                seen.insert(node["id"].as_str().unwrap().to_owned()),
+                "a product came twice"
+            );
+        }
+        if page["pageInfo"]["hasNextPage"] != true {
+            break page["totalCount"].as_u64().unwrap();
+        }
+        after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
+    };
+    assert_eq!(seen.len() as u64, total);
+    assert!(total > 50, "every product, not the old first fifty");
+}
+
+#[tokio::test]
+async fn an_alcohol_free_lager_is_both() {
+    let h = harness().await;
+    let (found, close) = names(&h, "alcohol free lager").await;
+    assert!(!close, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .take(3)
+            .all(|n| n.to_lowercase().contains("alcohol free") || n.contains("Low alcohol")),
+        "{found:?}"
+    );
+    let (found, _) = names(&h, "a pint of stella").await;
+    assert!(found.iter().all(|n| n.contains("Stella")), "{found:?}");
+}
