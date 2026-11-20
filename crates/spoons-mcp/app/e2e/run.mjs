@@ -238,22 +238,20 @@ async function lastResultText(page) {
   check(true, "the options sheet adds fish and chips with mushy peas and a Guinness from the meal deal");
   await menu.app.fill(".search input", "");
 
-  // The app quotes, and pays on two taps of a button that shows the total: the first only arms it.
+  // The app quotes, and its button is the acceptance: it names the total and table, and one tap pays.
   await menu.app.click(".basket-bar");
   await settle(menu.app, ".basket-foot");
   await menu.app.click(".basket-foot .primary");
   await settle(menu.app, ".quote");
   const html = await menu.app.content();
   const pay = menu.app.locator(".quote .primary.pay");
-  check(/^Pay £\d/.test((await pay.innerText()).trim()), "the quote card has a Pay button with the total");
-  await pay.click();
-  check(/Tap again to pay £[\d.]+ · table \d+/.test(await pay.innerText()), "one tap only arms it, naming the total and table");
-  check((await menu.app.locator(".quote .eyebrow").innerText()).startsWith("Quote"), "one tap pays nothing");
+  check(/^Confirm payment · £[\d.]+ · table \d+$/.test((await pay.innerText()).trim()), "the quote's button names the total and table");
+  check((await menu.app.locator(".quote .eyebrow").innerText()).startsWith("Quote"), "nothing is paid before the tap");
   await pay.click();
   await menu.app.waitForFunction(() => document.querySelector(".quote .eyebrow")?.textContent?.startsWith("Order"), null, {
     timeout: 25000,
   });
-  check(true, "the second tap pays, and the card follows the order");
+  check(true, "the tap pays, and the card follows the order");
   check(html.length > 0, "the app rendered");
 
   // Text-only hosts get the whole response as text.

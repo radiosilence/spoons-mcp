@@ -9,8 +9,8 @@ import { Icon, Pouring } from "../ui";
  * if a server died mid-request, so polling it would spin. */
 const LIVE: OrderStatus[] = ["PENDING", "IN_PROGRESS", "PAID"];
 
-/** A quote, and once paying starts, its order. Its Pay button shows the total and table, and takes two taps: the
- * first arms it, the second pays, so a stray tap can't spend anything. */
+/** A quote, and once paying starts, its order. Its button is the user's acceptance: it names the total and table,
+ * and one tap pays. */
 export function QuoteView({
   quoteId,
   result,
@@ -25,17 +25,10 @@ export function QuoteView({
   const [quote, setQuote] = useState<Quote | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [armed, setArmed] = useState(false);
   const [paid, setPaid] = useState<PayLike | null>(null);
   const [paying, setPaying] = useState(false);
   result = paid ?? result;
 
-  // An armed button disarms itself if the second tap doesn't come.
-  useEffect(() => {
-    if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 5000);
-    return () => clearTimeout(t);
-  }, [armed]);
 
   useEffect(() => {
     if (!quoteId) return;
@@ -150,22 +143,16 @@ export function QuoteView({
       )}
       {status === "NOT_STARTED" && !paid?.question && (
         <button
-          class={`primary wide pay ${armed ? "armed" : ""}`}
+          class="primary wide pay"
           disabled={paying}
           onClick={async () => {
-            if (!armed) return setArmed(true);
-            setArmed(false);
             setPaying(true);
             const r = await payNow(quote);
             setPaying(false);
             if (r) setPaid(r);
           }}
         >
-          {paying
-            ? "Paying…"
-            : armed
-              ? `Tap again to pay ${quote.total.formatted} · table ${quote.table}`
-              : `Pay ${quote.total.formatted}`}
+          {paying ? "Paying…" : `Confirm payment · ${quote.total.formatted} · table ${quote.table}`}
         </button>
       )}
     </article>

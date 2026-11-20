@@ -355,5 +355,3 @@ button:disabled { cursor: default; opacity: 0.5; }
 /* While a sheet is open its button sits where a toast would; the toast moves to the top. */
 body:has(.sheet-backdrop) .toast { top: 12px; bottom: auto; }
 .sheet-foot .primary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The Pay button's second tap: armed, it says what it will pay and where. */
-.primary.pay.armed { background: var(--ok); border-color: var(--ok); color: #fff; animation: fade 0.15s ease-out; }
