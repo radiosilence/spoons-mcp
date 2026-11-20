@@ -63,7 +63,8 @@ Each MCP session has a basket on the server (`basketAdd`, `basketSet`, `basketRe
 prices the basket, or explicit items, at the till for a table and changes nothing. Nothing is quoted without a table,
 and the server never picks one. `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then CONFIRM: PREVIEW changes
 nothing and returns a token bound to its arguments, CONFIRM spends it, and the server instructions tell the model
-to confirm only on the user's explicit yes. `order(quoteId:, waitSecs:)` follows a payment.
+to confirm only on the user's say-so: their yes, or for `pay`, "and pay" said with the order. Once given, the pub
+and table stick for the conversation: a quote remembers them, and a later quote without a table uses them. `order(quoteId:, waitSecs:)` follows a payment.
 
 "Four pints of Abbot to table 4":
 

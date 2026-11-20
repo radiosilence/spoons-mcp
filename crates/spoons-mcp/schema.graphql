@@ -450,7 +450,7 @@ type MutationRoot {
 	Prices an order at the pub's till for a table, from `items` or else from the basket. Changes nothing at
 	the pub. Show the user the lines, total and table, then preview and confirm `pay` on their yes, or straight
 	away when they asked to pay with the order. The pub and table default to the conversation's (the last ones
-	set or quoted), which a quote remembers; with none yet, ask the user for the table rather than make one up.
+	set or quoted, unless the basket holds things at another pub), which a quote remembers; with none yet, ask the user for the table rather than make one up.
 	Requests: the table list, the menu if not read today, and the till.
 	"""
 	quote(

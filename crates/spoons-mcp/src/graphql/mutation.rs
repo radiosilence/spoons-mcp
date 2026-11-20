@@ -3,7 +3,7 @@
 //! Basket changes are this conversation's own and reach nothing outside the server. `quote` prices at the till and
 //! changes nothing at the pub. `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then CONFIRM: PREVIEW returns
 //! what would happen and a token, and CONFIRM needs that token with the same arguments, which only the user's
-//! explicit yes should send.
+//! say-so should send: a yes to the preview, or, for `pay`, "and pay" given with the order.
 
 use std::sync::Arc;
 
@@ -507,7 +507,7 @@ impl MutationRoot {
     /// Prices an order at the pub's till for a table, from `items` or else from the basket. Changes nothing at
     /// the pub. Show the user the lines, total and table, then preview and confirm `pay` on their yes, or straight
     /// away when they asked to pay with the order. The pub and table default to the conversation's (the last ones
-    /// set or quoted), which a quote remembers; with none yet, ask the user for the table rather than make one up.
+    /// set or quoted, unless the basket holds things at another pub), which a quote remembers; with none yet, ask the user for the table rather than make one up.
     /// Requests: the table list, the menu if not read today, and the till.
     async fn quote(
         &self,
@@ -572,7 +572,7 @@ impl MutationRoot {
             let device = service.device_id()?;
             let order = service.quote(&pub_ref, table, &wanted, &device).await?;
             session.remember_quote(&order.quote_id);
-            remember_place(service, session, &pub_ref, table).await;
+            remember_place(service, session, &pub_ref, table, basket.version).await;
             Ok(order)
         }
         .await;
@@ -883,9 +883,19 @@ where
 }
 
 /// Keeps a quote's pub and table as the conversation's, so the next order goes to the same table without asking.
-/// A basket of things at another pub is left as it is. Best effort: the menu is already read for this table.
-async fn remember_place(service: &Service, session: &Session, pub_ref: &PubRef, table: u32) {
+/// A basket of things at another pub is left as it is, and so is one that changed while the till answered (a
+/// `setTable` meanwhile is newer than this quote). Best effort: the menu is already read for this table.
+async fn remember_place(
+    service: &Service,
+    session: &Session,
+    pub_ref: &PubRef,
+    table: u32,
+    seen: u64,
+) {
     let basket = session.basket();
+    if basket.version != seen {
+        return;
+    }
     if same_pub(&basket, pub_ref) && basket.table == Some(table) {
         return;
     }
@@ -896,6 +906,9 @@ async fn remember_place(service: &Service, session: &Session, pub_ref: &PubRef, 
         return;
     };
     let _ = session.change(|basket| {
+        if basket.version != seen {
+            return Ok(());
+        }
         if !same_pub(basket, pub_ref) {
             if !basket.items.is_empty() {
                 return Ok(());
