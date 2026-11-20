@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4
+
+### Fixed
+
+- **Claude pays on your yes again.** The instructions had grown so cautious that Claude read paying as something it wasn't allowed to do or had to leave to the app; they now say plainly that a yes means PREVIEW then CONFIRM, and that the server enters the saved card itself.
+
 ## 0.5.3
 
 ### Fixed
