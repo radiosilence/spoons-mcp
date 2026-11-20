@@ -445,15 +445,24 @@ impl Pub {
             .map(|t| u32::try_from(t).map_err(|_| gql("a table number is positive")))
             .transpose()?;
         let pub_ref = self.pub_ref();
-        let table = table.or_else(|| {
-            let here = ctx
-                .data_unchecked::<Arc<crate::session::Session>>()
-                .basket();
-            here.pub_ref
-                .filter(|p| p.venue_ref == pub_ref.venue_ref)
-                .and(here.table)
-        });
-        let area = service.sales_area(&pub_ref, table).await.map_err(gql)?;
+        // Without a table, the conversation's at this pub, in the area the basket already has for it: no table
+        // list to read, and no failure when that table has since stopped taking orders.
+        let here = ctx
+            .data_unchecked::<Arc<crate::session::Session>>()
+            .basket();
+        let inherited = match (table, &here.pub_ref, here.table, here.sales_area) {
+            (None, Some(p), Some(t), Some(area)) if p.venue_ref == pub_ref.venue_ref => {
+                Some((t, area))
+            }
+            _ => None,
+        };
+        let (table, area) = match inherited {
+            Some((t, area)) => (Some(t), area),
+            None => (
+                table,
+                service.sales_area(&pub_ref, table).await.map_err(gql)?,
+            ),
+        };
         let catalogue = service.catalogue(&pub_ref, area).await.map_err(gql)?;
         Ok(Menu {
             pub_: self.clone(),
@@ -576,7 +585,7 @@ impl Menu {
     fn to_markdown(&self, kinds: Option<&[Kind]>, by_category: bool) -> String {
         let currency = self.pub_.currency_code();
         let money = |amount: f64| Money::new(amount, currency).formatted;
-        let mut out = format!("# {}", self.pub_.venue.name);
+        let mut out = format!("# {}", escape_markdown(&self.pub_.venue.name));
         if let Some(t) = self.table {
             out.push_str(&format!(" · table {t}"));
         }
@@ -610,6 +619,11 @@ impl Menu {
             out.push_str("\nNothing on the menu matches.\n");
         }
         for (heading, list) in groups {
+            let heading = if heading.trim().is_empty() {
+                "Other".to_owned()
+            } else {
+                escape_markdown(&heading)
+            };
             out.push_str(&format!("\n## {heading}\n\n"));
             for e in list {
                 let name = escape_markdown(&e.product.name);

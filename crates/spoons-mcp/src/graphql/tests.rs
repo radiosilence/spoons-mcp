@@ -1518,3 +1518,26 @@ async fn the_menu_as_markdown_for_the_pub_im_in() {
     assert!(food.contains("\n## Pub classics\n"), "{food}");
     assert!(!food.contains("## Cask ales"), "{food}");
 }
+
+/// `pub { menu { markdown } }` names no pub; the app beside it still gets the conversation's.
+#[tokio::test]
+async fn the_app_finds_the_pub_im_in_without_a_ref() {
+    let h = harness().await;
+    let call = |query: &str| -> crate::mcp::GraphqlRequest {
+        serde_json::from_value(json!({ "query": query })).unwrap()
+    };
+    h.spoons
+        .run_tool(
+            caller(),
+            &call("mutation { setTable(pub: 254, table: 4) { success } }"),
+        )
+        .await;
+    let result = h
+        .spoons
+        .run_tool(caller(), &call("{ pub { menu { table markdown } } }"))
+        .await;
+    assert_eq!(answer(&result)["data"]["pub"]["menu"]["table"], 4);
+    let view = &result.structured_content.unwrap()["view"];
+    assert_eq!(view["screen"], "menu");
+    assert_eq!(view["pub"], 254);
+}

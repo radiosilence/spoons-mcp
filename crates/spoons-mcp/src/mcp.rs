@@ -200,8 +200,17 @@ impl Spoons {
         }
         .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
         let data = body.get("data").cloned().unwrap_or_default();
+        let mut view = crate::ui::view(&req.query, &variables, &data, &hints);
+        // `pub` without a ref is the conversation's pub: the app needs its ref all the same.
+        if let Some(view) = view
+            .as_mut()
+            .filter(|v| v.get("pub").is_some_and(serde_json::Value::is_null))
+            && let Some(here) = session.basket().pub_ref
+        {
+            view["pub"] = serde_json::json!(here.venue_ref);
+        }
         let structured = serde_json::json!({
-            "view": crate::ui::view(&req.query, &variables, &data, &hints),
+            "view": view,
             "ui": hints,
             "session": session.id,
         });
