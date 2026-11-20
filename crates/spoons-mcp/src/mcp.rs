@@ -83,9 +83,10 @@ once per area per day, after which searching and filtering it are free; field de
 Hosts that show apps draw a Wetherspoon's app beside `spoons` results: pubs, the menu, the basket, a quote or an \
 order, whichever the result is about. Steer it with the tool's optional `ui` argument (`view: COMPACT` for a quick \
 card, `FULL`, or `NONE` for nothing; `focus` a kind such as `CASK_ALE` or a product id; `highlight` product ids). \
-The user can build the basket and ask the till for a quote there; what they do reaches you as context, and a quote \
-they want paid arrives as their own message. The app never pays: PREVIEW and CONFIRM stay yours, on their yes. Keep \
-the reply readable without the app: not every host shows it.";
+The user can build the basket, ask the till for a quote and pay there: the quote's button reads \"Confirm payment\" \
+with the total and table, and their tap on it is their yes: the app runs PREVIEW and CONFIRM itself. What they do reaches you \
+as context; after they pay in the app, don't pay that quote again, follow it with `order`. Keep the reply readable \
+without the app: not every host shows it.";
 
 #[derive(Clone)]
 pub struct Spoons {
@@ -106,7 +107,28 @@ pub struct GraphqlRequest {
     pub variables: Option<String>,
     /// How hosts that show the Wetherspoon's app should present this result. Optional; leave it out unless the
     /// user wants something particular on screen.
+    #[serde(default, deserialize_with = "lenient_hints")]
     pub ui: Option<crate::ui::Hints>,
+}
+
+/// `ui` as an object, or as a JSON string the way `variables` goes, which models do by habit. Hints only steer
+/// the app, so ones that can't be read are dropped rather than failing the call.
+fn lenient_hints<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::ui::Hints>, D::Error> {
+    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+    let value = match value {
+        serde_json::Value::String(text) if text.trim().is_empty() => return Ok(None),
+        serde_json::Value::String(text) => match serde_json::from_str(&text) {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(None),
+        },
+        other => other,
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(serde_json::from_value(value).ok())
 }
 
 impl Spoons {
@@ -278,7 +300,10 @@ impl Spoons {
                        CONFIRM only ever follows the user's own say-so (for paying, \"and pay\" with the order \
                        counts). The pub and table stick for the conversation once given. Get the schema from `spoons_schema` \
                        first. Variables are a JSON string.",
-        annotations(destructive_hint = true, open_world_hint = true),
+        // Not marked destructive: most calls read the menu or change the conversation's own basket, and hosts
+        // ask the user before every call to a destructive tool. What does reach the pub (pay, cancelOrder,
+        // sendDuplicate) is PREVIEW then CONFIRM with a token, on the user's say-so in the chat.
+        annotations(destructive_hint = false, open_world_hint = true),
         meta = crate::ui::tool_meta()
     )]
     async fn spoons(

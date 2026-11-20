@@ -2,8 +2,8 @@
 //
 // Everything the app reads or changes is a `spoons` tool call with ordinary GraphQL, exactly as the model would
 // make it. What the user does here reaches the model as context (`ui/update-model-context`); what the model does
-// reaches the app because it keeps watching the basket. Money only ever moves in the conversation: the app may ask
-// for a quote and post a question into the chat, but it never sends a CONFIRM.
+// reaches the app because it keeps watching the basket. Money moves only on the user's say-so: in the chat, or by
+// a tap on the quote's "Confirm payment" button, which names the total and table; never on the app's own.
 
 import {
   App,

@@ -1541,3 +1541,23 @@ async fn the_app_finds_the_pub_im_in_without_a_ref() {
     assert_eq!(view["screen"], "menu");
     assert_eq!(view["pub"], 254);
 }
+
+/// Models pass `ui` the way they pass `variables`, as a JSON string; it reads the same as an object, and hints
+/// that can't be read are dropped rather than failing the call.
+#[tokio::test]
+async fn ui_hints_may_come_as_a_string() {
+    let request = |ui: Value| -> crate::mcp::GraphqlRequest {
+        serde_json::from_value(json!({ "query": "{ now }", "ui": ui })).unwrap()
+    };
+    let as_string = request(json!("{\"view\": \"FULL\", \"focus\": \"CASK_ALE\"}"));
+    let as_object = request(json!({ "view": "FULL", "focus": "CASK_ALE" }));
+    assert_eq!(
+        serde_json::to_value(&as_string.ui).unwrap(),
+        serde_json::to_value(&as_object.ui).unwrap()
+    );
+    assert_eq!(serde_json::to_value(&as_string.ui).unwrap()["view"], "FULL");
+    assert!(request(json!("not json")).ui.is_none());
+    assert!(request(json!("")).ui.is_none());
+    assert!(request(Value::Null).ui.is_none());
+    assert!(request(json!({ "view": "SIDEWAYS" })).ui.is_none());
+}

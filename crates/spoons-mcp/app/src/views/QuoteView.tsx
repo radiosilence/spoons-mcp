@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { gql, openLink } from "../bridge";
 import * as Q from "../queries";
-import { askToPay } from "../store";
+import { payNow } from "../store";
 import type { Order, OrderStatus, PayLike, Quote } from "../types";
 import { Icon, Pouring } from "../ui";
 
@@ -9,7 +9,8 @@ import { Icon, Pouring } from "../ui";
  * if a server died mid-request, so polling it would spin. */
 const LIVE: OrderStatus[] = ["PENDING", "IN_PROGRESS", "PAID"];
 
-/** A quote, and once paying starts, its order. Never a pay button: that's the conversation's. */
+/** A quote, and once paying starts, its order. Its button is the user's acceptance: it names the total and table,
+ * and one tap pays. */
 export function QuoteView({
   quoteId,
   result,
@@ -24,6 +25,10 @@ export function QuoteView({
   const [quote, setQuote] = useState<Quote | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paid, setPaid] = useState<PayLike | null>(null);
+  const [paying, setPaying] = useState(false);
+  result = paid ?? result;
+
 
   useEffect(() => {
     if (!quoteId) return;
@@ -124,12 +129,9 @@ export function QuoteView({
           <Icon name="chat" size={16} /> {result.question.split(". ")[0]}. Answer in the chat.
         </p>
       )}
-      {result?.preview && status === "NOT_STARTED" && (
+      {result?.preview && status === "NOT_STARTED" && !paid && (
         <div class="callout">
           <p class="small">{result.preview}</p>
-          <p class="waiting">
-            <Icon name="chat" size={16} /> Waiting for your yes in the chat. Nothing is paid until you say so there.
-          </p>
         </div>
       )}
       {result?.card && <p class="small muted">{result.card}</p>}
@@ -139,9 +141,18 @@ export function QuoteView({
           <Icon name="link" size={16} /> Open the payment page
         </button>
       )}
-      {status === "NOT_STARTED" && !result?.preview && (
-        <button class="primary wide" onClick={() => void askToPay(quote)}>
-          <Icon name="chat" size={16} /> Ask to pay in the chat
+      {status === "NOT_STARTED" && !paid?.question && (
+        <button
+          class="primary wide pay"
+          disabled={paying}
+          onClick={async () => {
+            setPaying(true);
+            const r = await payNow(quote);
+            setPaying(false);
+            if (r) setPaid(r);
+          }}
+        >
+          {paying ? "Paying…" : `Confirm payment · ${quote.total.formatted} · table ${quote.table}`}
         </button>
       )}
     </article>

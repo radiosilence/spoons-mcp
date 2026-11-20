@@ -47,6 +47,15 @@ const QUOTE_FIELDS = `id pubRef pubName table total ${MONEY} menuTotal ${MONEY} 
 
 export const QUOTE = `query($id: ID!) { quote(id: $id) { ${QUOTE_FIELDS} } }`;
 
+const PAY_FIELDS = "success error preview confirmationToken status paymentPage card question next";
+
+/** What paying will do, and the token that does it. Changes nothing. */
+export const PAY_PREVIEW = `mutation($id: ID!) { pay(quoteId: $id, action: PREVIEW) { ${PAY_FIELDS} } }`;
+
+/** Pays: on the user's tap of the Pay button, never on its own. */
+export const PAY_CONFIRM = `mutation($id: ID!, $token: String!) {
+  pay(quoteId: $id, action: CONFIRM, confirmationToken: $token) { ${PAY_FIELDS} } }`;
+
 export const ORDER = `query($id: ID!, $wait: Int) { order(quoteId: $id, waitSecs: $wait) {
   status meaning orderRef placedAt paymentPage quote { ${QUOTE_FIELDS} } } }`;
 
