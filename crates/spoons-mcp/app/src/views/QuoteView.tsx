@@ -140,11 +140,6 @@ export function QuoteView({
           <Icon name="chat" size={16} /> {result.question.split(". ")[0]}. Answer in the chat.
         </p>
       )}
-      {result?.preview && status === "NOT_STARTED" && !paid && (
-        <div class="callout">
-          <p class="small">{result.preview}</p>
-        </div>
-      )}
       {result?.card && <p class="small muted">{result.card}</p>}
 
       {page && (status === "PENDING" || status === "PREPARING") && (
@@ -163,7 +158,7 @@ export function QuoteView({
             if (r) setPaid(r);
           }}
         >
-          {paying ? "Paying…" : `Confirm payment · ${quote.total.formatted} · table ${quote.table}`}
+          {paying ? "Paying…" : `Confirm payment · ${quote.total.formatted}`}
         </button>
       )}
     </article>
