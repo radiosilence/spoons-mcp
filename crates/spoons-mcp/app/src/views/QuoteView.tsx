@@ -136,6 +136,16 @@ export function QuoteView({
   );
 }
 
+/** The server's `meaning` is written for the model; this is for the person holding the phone. */
+const FOR_PEOPLE: Partial<Record<OrderStatus, string>> = {
+  PREPARING: "Starting the payment…",
+  PENDING: "Waiting for your card on the payment page.",
+  IN_PROGRESS: "Your bank may ask you to approve this in your banking app.",
+  PAID: "Paid. Sending it to the bar…",
+  UNCONFIRMED: "The payment didn’t get a clear answer. Ask in the chat before trying again.",
+  UNKNOWN: "The payment is in a state this app doesn’t know. Ask in the chat.",
+};
+
 const STEPS: { label: string; done: OrderStatus[] }[] = [
   { label: "Quoted", done: ["NOT_STARTED", "PREPARING", "PENDING", "IN_PROGRESS", "PAID", "PLACED", "DUPLICATE"] },
   { label: "Card", done: ["IN_PROGRESS", "PAID", "PLACED", "DUPLICATE"] },
@@ -171,7 +181,7 @@ function Tracker({ status, order }: { status: OrderStatus; order: Order | null }
           Order <b>#{order.orderRef}</b> is on its way.
         </p>
       )}
-      {order && status !== "PLACED" && status !== "NOT_STARTED" && <p class="muted small">{order.meaning}</p>}
+      {FOR_PEOPLE[status] && <p class="muted small">{FOR_PEOPLE[status]}</p>}
     </div>
   );
 }
