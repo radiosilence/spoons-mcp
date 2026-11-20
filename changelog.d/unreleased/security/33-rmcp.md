@@ -1,1 +1,0 @@
-- **rmcp 3.11.** Past RUSTSEC-2026-0462 (unbounded response bodies in rmcp's HTTP client), which the server doesn't use but the audit rightly flags.

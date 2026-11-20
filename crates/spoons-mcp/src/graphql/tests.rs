@@ -771,3 +771,51 @@ async fn one_pub_failing_doesnt_fail_the_list() {
             .all(|n| n["openNow"].is_null())
     );
 }
+
+#[tokio::test]
+async fn quotes_items_by_a_sizes_name_as_well_as_its_label() {
+    let h = harness().await;
+    // Wine labels carry calories and units; people (and models) say "250ml glass".
+    let merlot = h
+        .run("{ pub(ref: 254) { menu(search: \"merlot\") { products { nodes { id portions { label name } } } } } }", json!({}))
+        .await;
+    let product = &merlot["pub"]["menu"]["products"]["nodes"][0];
+    let big = product["portions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "250ml glass")
+        .unwrap();
+    assert_ne!(
+        big["label"], big["name"],
+        "the fixture's label carries more than the name"
+    );
+    let quoted = h
+        .run(
+            "mutation($p: ID!) { quote(pub: 254, table: 4, items: [{productId: $p, portion: \"250ml glass\"}]) \
+               { success error quote { lines { portion } } } }",
+            json!({ "p": product["id"] }),
+        )
+        .await;
+    assert_eq!(quoted["quote"]["success"], true, "{quoted}");
+    assert_eq!(
+        quoted["quote"]["quote"]["lines"][0]["portion"],
+        big["label"]
+    );
+}
+
+#[tokio::test]
+async fn an_api_thats_down_is_an_error_not_a_list_of_empty_pubs() {
+    let h = harness().await;
+    // None of these pubs have details, ales or tables in the fixtures.
+    let response = h
+        .spoons
+        .execute(
+            caller(),
+            "{ pubs(query: \"greenwich\") { nodes { name tables { number } } } }",
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(!response.errors.is_empty());
+}
