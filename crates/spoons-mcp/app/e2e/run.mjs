@@ -76,7 +76,8 @@ async function call(page, query, extra = {}) {
   await page.fill("textarea", JSON.stringify({ query, ...extra }));
   await page.click("button[type=submit]");
   await page.waitForFunction((n) => document.querySelectorAll("iframe").length > n, before);
-  const outer = page.locator("iframe").last();
+  // Pinned by index: `.last()` would follow whichever app came last.
+  const outer = page.locator("iframe").nth((await page.locator("iframe").count()) - 1);
   let app;
   for (let i = 0; i < 150 && !app; i++) {
     app = page.frames().find((f) => !seen.has(f) && f.parentFrame()?.url().includes("sandbox.html"));
