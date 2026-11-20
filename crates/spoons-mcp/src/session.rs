@@ -28,11 +28,26 @@ pub struct Item {
     pub colour: Option<crate::catalogue::Colour>,
     /// Why it can't be quoted as it stands, such as being off the menu for the table.
     pub note: Option<String>,
+    /// The options chosen, as (group id, option id), and by name.
+    pub picks: Vec<(u64, u64)>,
+    pub choices: Vec<String>,
+    /// For a meal's included drink: the deal's category it's ordered through, and the meal line it goes with.
+    pub listing: Option<u64>,
+    pub with: Option<String>,
 }
 
 impl Item {
+    /// The product, size, options and deal: two pints of one beer are one line, a pudding with chips and one
+    /// with mash are two.
     pub fn id(&self) -> String {
-        line_id(self.product_id, &self.portion)
+        let mut id = line_id(self.product_id, &self.portion);
+        for (_, option) in &self.picks {
+            id.push_str(&format!("+{option}"));
+        }
+        if let (Some(listing), Some(with)) = (self.listing, &self.with) {
+            id.push_str(&format!("@{listing}/{with}"));
+        }
+        id
     }
 }
 
@@ -52,6 +67,26 @@ pub struct Basket {
 }
 
 impl Basket {
+    /// Keeps each meal's included drinks to as many as there are meals, dropping drinks whose meal has gone.
+    pub fn trim_drinks(&mut self) {
+        let mut room: std::collections::HashMap<String, u32> = self
+            .items
+            .iter()
+            .filter(|i| i.with.is_none())
+            .map(|i| (i.id(), i.quantity))
+            .collect();
+        for item in &mut self.items {
+            let Some(meal) = item.with.clone() else {
+                continue;
+            };
+            let left = room.entry(meal).or_insert(0);
+            let keep = item.quantity.min(*left);
+            *left -= keep;
+            item.quantity = keep;
+        }
+        self.items.retain(|i| i.quantity > 0);
+    }
+
     pub fn count(&self) -> u32 {
         self.items.iter().map(|item| item.quantity).sum()
     }
@@ -138,6 +173,7 @@ impl Session {
         let mut state = self.state.lock().unwrap();
         let mut basket = state.basket.clone();
         let result = change(&mut basket)?;
+        basket.trim_drinks();
         basket.version = state.basket.version + 1;
         let version = basket.version;
         state.basket = basket;

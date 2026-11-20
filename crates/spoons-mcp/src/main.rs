@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use spoons_api_client::Client;
 
 mod catalogue;
+mod choices;
 mod dump;
 mod graphql;
 mod mcp;
