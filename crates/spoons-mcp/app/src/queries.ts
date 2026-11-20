@@ -61,9 +61,10 @@ export const ORDER = `query($id: ID!, $wait: Int) { order(quoteId: $id, waitSecs
 
 const RESULT = `success error basket { ${BASKET_FIELDS} }`;
 
-export const ADD = `mutation($pub: Int, $product: ID!, $portion: String, $options: [OptionPickInput!],
+export const ADD = `mutation($pub: Int, $table: Int, $product: ID!, $portion: String, $options: [OptionPickInput!],
   $drink: IncludedDrinkInput) {
-  basketAdd(pub: $pub, productId: $product, portion: $portion, options: $options, includeDrink: $drink) { ${RESULT} } }`;
+  basketAdd(pub: $pub, table: $table, productId: $product, portion: $portion, options: $options, includeDrink: $drink) {
+    ${RESULT} } }`;
 
 export const SET = `mutation($line: ID!, $q: Int!) { basketSet(lineId: $line, quantity: $q) { ${RESULT} } }`;
 

@@ -66,7 +66,7 @@ export function OptionSheet(props: {
     setBusy(true);
     const options = Object.entries(picked).map(([group, option]) => ({ group, options: [option] }));
     const said = groups.flatMap((g) => g.options.filter((o) => o.id === picked[g.id]).map((o) => o.label));
-    const ok = await add(props.pub, product, portion, {
+    const ok = await add(props.pub, props.table, product, portion, {
       options,
       said,
       drink: drink ? { productId: drink.id, name: drink.name } : undefined,

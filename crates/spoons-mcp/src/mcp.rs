@@ -231,6 +231,18 @@ impl Spoons {
         {
             view["pub"] = serde_json::json!(here.venue_ref);
         }
+        // A menu opened without a table is the conversation's table, when it's at that pub: the app adds to it.
+        if let Some(view) = view
+            .as_mut()
+            .filter(|v| v["screen"] == "menu" && v["table"].is_null())
+        {
+            let basket = session.basket();
+            if let (Some(here), Some(table)) = (&basket.pub_ref, basket.table)
+                && view["pub"] == serde_json::json!(here.venue_ref)
+            {
+                view["table"] = serde_json::json!(table);
+            }
+        }
         let structured = serde_json::json!({
             "view": view,
             "ui": hints,

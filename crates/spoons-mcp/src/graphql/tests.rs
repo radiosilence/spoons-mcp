@@ -1540,6 +1540,8 @@ async fn the_app_finds_the_pub_im_in_without_a_ref() {
     let view = &result.structured_content.unwrap()["view"];
     assert_eq!(view["screen"], "menu");
     assert_eq!(view["pub"], 254);
+    // The table the chat set, so a tap in the app adds there.
+    assert_eq!(view["table"], 4);
 }
 
 /// Models pass `ui` the way they pass `variables`, as a JSON string; it reads the same as an object, and hints
