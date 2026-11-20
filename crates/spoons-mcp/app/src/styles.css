@@ -300,9 +300,7 @@ button:disabled { cursor: default; opacity: 0.5; }
 /* Quote and order */
 .quote {
   padding: 16px; border-radius: calc(var(--radius) + 4px); border: 1px solid var(--line);
-  background:
-    repeating-linear-gradient(0deg, transparent 0 27px, color-mix(in srgb, var(--line2) 60%, transparent) 27px 28px),
-    var(--bg);
+  background: var(--bg);
   box-shadow: var(--shadow); position: relative;
 }
 .quote-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }

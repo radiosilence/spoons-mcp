@@ -245,7 +245,7 @@ async function lastResultText(page) {
   await settle(menu.app, ".quote");
   const html = await menu.app.content();
   const pay = menu.app.locator(".quote .primary.pay");
-  check(/^Confirm payment · £[\d.]+ · table \d+$/.test((await pay.innerText()).trim()), "the quote's button names the total and table");
+  check(/^Confirm payment · £[\d.]+$/.test((await pay.innerText()).trim()), "the quote's button names the total, on one line");
   // textContent: the eyebrow is styled in capitals, which innerText would report.
   check((await menu.app.locator(".quote .eyebrow").textContent())?.startsWith("Quote"), "nothing is paid before the tap");
   await pay.click();

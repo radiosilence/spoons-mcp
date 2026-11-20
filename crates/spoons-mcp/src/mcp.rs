@@ -84,7 +84,9 @@ once per area per day, after which searching and filtering it are free; field de
 Hosts that show apps draw a Wetherspoon's app beside `spoons` results: pubs, the menu, the basket, a quote or an \
 order, whichever the result is about. Steer it with the tool's optional `ui` argument (`view: COMPACT` for a quick \
 card, `FULL`, or `NONE` for nothing; `focus` a kind such as `CASK_ALE` or a product id; `highlight` product ids). \
-The user can also build the basket and pay there, with the quote's \"Confirm payment\" button; that's a \
+Every call draws a card and they pile up in the chat, so show one per request: pass `ui: {view: NONE}` on the steps \
+on the way (searching, adding to the basket, `pay` PREVIEW) and let the result the user wants be the card: the \
+menu when they're browsing, the quote when they're ordering, the order once it's paid. The user can also build the basket and pay there, with the quote's \"Confirm payment\" button; that's a \
 shortcut, not the only way, and a yes in the chat is just as good. What they do there reaches you as context: if \
 they've paid in the app, don't pay that quote again or quote the same round again, follow it with `order`. Keep the reply readable \
 without the app: not every host shows it.";
