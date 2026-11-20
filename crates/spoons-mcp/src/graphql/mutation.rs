@@ -101,6 +101,7 @@ fn item(
         quantity,
         unit_price: Some(size.price),
         kind: entry.kind,
+        colour: entry.colour.clone(),
         note: None,
     })
 }
@@ -367,6 +368,7 @@ impl MutationRoot {
                             kind: catalogue
                                 .get(l.product_id)
                                 .map_or(crate::catalogue::Kind::Other, |e| e.kind),
+                            colour: catalogue.get(l.product_id).and_then(|e| e.colour.clone()),
                             note: None,
                         })
                         .collect(),

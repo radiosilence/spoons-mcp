@@ -11,7 +11,9 @@ use std::time::Duration;
 use anyhow::Result;
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{
-    CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities, ServerConfig,
+    CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
+    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::{
@@ -59,7 +61,13 @@ table and usual order from this one. For \"another\" or \"same again\", `basketF
 (`quotes` lists this conversation's), check the table still stands, then `quote`.\n\n\
 The till's price is what's charged; when it differs from the menu (`differsFromMenu`), say so. A pub's menu is read \
 once per area per day, after which searching and filtering it are free; field descriptions say what the rest costs. \
-`now` gives the time in London for free.";
+`now` gives the time in London for free.\n\n\
+Hosts that show apps draw a Wetherspoon's app beside `spoons` results: pubs, the menu, the basket, a quote or an \
+order, whichever the result is about. Steer it with the tool's optional `ui` argument (`view: COMPACT` for a quick \
+card, `FULL`, or `NONE` for nothing; `focus` a kind such as `CASK_ALE` or a product id; `highlight` product ids). \
+The user can build the basket and ask the till for a quote there; what they do reaches you as context, and a quote \
+they want paid arrives as their own message. The app never pays: PREVIEW and CONFIRM stay yours, on their yes. Keep \
+the reply readable without the app: not every host shows it.";
 
 #[derive(Clone)]
 pub struct Spoons {
@@ -78,6 +86,9 @@ pub struct GraphqlRequest {
     pub query: String,
     /// Variables, as a JSON object encoded in a string.
     pub variables: Option<String>,
+    /// How hosts that show the Wetherspoon's app should present this result. Optional; leave it out unless the
+    /// user wants something particular on screen.
+    pub ui: Option<crate::ui::Hints>,
 }
 
 impl Spoons {
@@ -99,6 +110,17 @@ impl Spoons {
         }
     }
 
+    /// The basket a call works on: its own MCP session's, or the one an app names, if it belongs to the caller.
+    fn session_for(&self, caller: &Caller, hints: Option<&crate::ui::Hints>) -> Arc<Session> {
+        self.service
+            .sessions
+            .register(&self.session, caller.tenant());
+        hints
+            .and_then(|h| h.session.as_deref())
+            .and_then(|id| self.service.sessions.find(id, caller.tenant()))
+            .unwrap_or_else(|| self.session.clone())
+    }
+
     /// Where this request's receipt goes. Over HTTP only its `X-Spoons-Email` header counts, since the server is
     /// shared and the gateway in front injects each user's own; over stdio, `SPOONS_EMAIL`.
     fn caller(&self, ctx: &RequestContext<RoleServer>) -> Caller {
@@ -111,24 +133,65 @@ impl Spoons {
         caller_from_headers(&parts.headers)
     }
 
+    #[cfg(test)]
     pub async fn execute(
         &self,
         caller: Caller,
         query: &str,
         variables: Option<&str>,
     ) -> Result<async_graphql::Response, String> {
-        let mut request =
-            graphql::request(query, self.service.clone(), self.session.clone(), caller);
-        if let Some(vars) = variables.filter(|v| !v.trim().is_empty()) {
-            match serde_json::from_str::<serde_json::Value>(vars) {
-                Ok(v @ serde_json::Value::Object(_)) => {
-                    request = request.variables(async_graphql::Variables::from_json(v));
-                }
-                Ok(_) => return Err("variables must be a JSON object".to_owned()),
-                Err(e) => return Err(format!("invalid variables JSON: {e}")),
-            }
-        }
-        Ok(self.schema.execute(request).await)
+        let variables = parse_variables(variables)?;
+        Ok(self
+            .execute_in(self.session.clone(), caller, query, &variables)
+            .await)
+    }
+
+    async fn execute_in(
+        &self,
+        session: Arc<Session>,
+        caller: Caller,
+        query: &str,
+        variables: &async_graphql::Variables,
+    ) -> async_graphql::Response {
+        let request = graphql::request(query, self.service.clone(), session, caller)
+            .variables(variables.clone());
+        self.schema.execute(request).await
+    }
+
+    /// A tool result: the response as text for everyone, and as structured content with the screen that fits it
+    /// for hosts showing the app.
+    pub async fn run_tool(&self, caller: Caller, req: &GraphqlRequest) -> CallToolResult {
+        let variables = match parse_variables(req.variables.as_deref()) {
+            Ok(v) => v,
+            Err(error) => return CallToolResult::error(vec![ContentBlock::text(error)]),
+        };
+        let session = self.session_for(&caller, req.ui.as_ref());
+        let response = self
+            .execute_in(session.clone(), caller, &req.query, &variables)
+            .await;
+        let mut structured = serde_json::to_value(&response).unwrap_or_default();
+        let text = serde_json::to_string_pretty(&structured)
+            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+        let hints = req.ui.clone().unwrap_or_default();
+        let data = structured.get("data").cloned().unwrap_or_default();
+        structured["view"] = crate::ui::view(&req.query, &variables, &data, &hints)
+            .unwrap_or(serde_json::Value::Null);
+        structured["ui"] = serde_json::to_value(&hints).unwrap_or_default();
+        structured["session"] = serde_json::Value::String(session.id.clone());
+        let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
+        result.structured_content = Some(structured);
+        result
+    }
+}
+
+fn parse_variables(variables: Option<&str>) -> Result<async_graphql::Variables, String> {
+    match variables.filter(|v| !v.trim().is_empty()) {
+        None => Ok(async_graphql::Variables::default()),
+        Some(vars) => match serde_json::from_str::<serde_json::Value>(vars) {
+            Ok(v @ serde_json::Value::Object(_)) => Ok(async_graphql::Variables::from_json(v)),
+            Ok(_) => Err("variables must be a JSON object".to_owned()),
+            Err(e) => Err(format!("invalid variables JSON: {e}")),
+        },
     }
 }
 
@@ -178,39 +241,66 @@ impl Spoons {
                        an order. Paying, cancelling and sending a held repeat order are PREVIEW then CONFIRM, and \
                        CONFIRM only ever follows the user's explicit yes. Get the schema from `spoons_schema` \
                        first. Variables are a JSON string.",
-        annotations(destructive_hint = true, open_world_hint = true)
+        annotations(destructive_hint = true, open_world_hint = true),
+        meta = crate::ui::tool_meta()
     )]
     async fn spoons(
         &self,
         ctx: RequestContext<RoleServer>,
         Parameters(req): Parameters<GraphqlRequest>,
     ) -> ToolResult {
-        let caller = self.caller(&ctx);
-        match self
-            .execute(caller, &req.query, req.variables.as_deref())
-            .await
-        {
-            Ok(response) => {
-                let json = serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
-                Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
-            }
-            Err(error) => Ok(CallToolResult::error(vec![ContentBlock::text(error)])),
-        }
+        Ok(self.run_tool(self.caller(&ctx), &req).await)
     }
 }
 
 #[tool_handler]
 impl ServerHandler for Spoons {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_protocol_version(ProtocolVersion::LATEST)
-            .with_server_info(
-                Implementation::new("spoons", env!("CARGO_PKG_VERSION"))
-                    .with_title("Wetherspoon's")
-                    .with_website_url("https://github.com/radiosilence/spoons-mcp"),
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .build(),
+        )
+        .with_protocol_version(ProtocolVersion::LATEST)
+        .with_server_info(
+            Implementation::new("spoons", env!("CARGO_PKG_VERSION"))
+                .with_title("Wetherspoon's")
+                .with_website_url("https://github.com/radiosilence/spoons-mcp"),
+        )
+        .with_instructions(INSTRUCTIONS)
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<ListResourcesResult, McpError> {
+        let resource = Resource::new(crate::ui::URI, "Wetherspoon's")
+            .with_title("Wetherspoon's ordering")
+            .with_description(
+                "Pubs, the menu, the basket, quotes and orders, for hosts that show MCP apps.",
             )
-            .with_instructions(INSTRUCTIONS)
+            .with_mime_type(crate::ui::MIME)
+            .with_meta(crate::ui::resource_meta());
+        Ok(ListResourcesResult::with_all_items(vec![resource]))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> std::result::Result<ReadResourceResponse, McpError> {
+        if request.uri != crate::ui::URI {
+            return Err(McpError::resource_not_found(
+                format!("no resource {}", request.uri),
+                None,
+            ));
+        }
+        let contents = ResourceContents::text(crate::ui::html(), crate::ui::URI)
+            .with_mime_type(crate::ui::MIME)
+            .with_meta(crate::ui::resource_meta());
+        Ok(ReadResourceResult::new(vec![contents]).into())
     }
 }
 
