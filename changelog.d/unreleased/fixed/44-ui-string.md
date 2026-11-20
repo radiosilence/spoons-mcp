@@ -1,1 +1,1 @@
-- **App hints as a string no longer fail the call.** `ui` is read whether it comes as an object or, as models often send it, a JSON string; hints that can't be read are dropped instead of failing the request.
+- **Smoother on a phone.** `ui` hints are read whether they come as an object or, as models often send them, a JSON string, instead of failing the call; and the `spoons` tool is no longer marked destructive, so hosts stop asking permission before every menu lookup. Paying, cancelling and sending a held order still go through PREVIEW and CONFIRM on the user's say-so.

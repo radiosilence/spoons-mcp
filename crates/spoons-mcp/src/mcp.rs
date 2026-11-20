@@ -299,7 +299,10 @@ impl Spoons {
                        CONFIRM only ever follows the user's own say-so (for paying, \"and pay\" with the order \
                        counts). The pub and table stick for the conversation once given. Get the schema from `spoons_schema` \
                        first. Variables are a JSON string.",
-        annotations(destructive_hint = true, open_world_hint = true),
+        // Not marked destructive: most calls read the menu or change the conversation's own basket, and hosts
+        // ask the user before every call to a destructive tool. What does reach the pub (pay, cancelOrder,
+        // sendDuplicate) is PREVIEW then CONFIRM with a token, on the user's say-so in the chat.
+        annotations(destructive_hint = false, open_world_hint = true),
         meta = crate::ui::tool_meta()
     )]
     async fn spoons(
