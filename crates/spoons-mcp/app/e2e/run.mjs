@@ -226,10 +226,8 @@ async function lastResultText(page) {
   await sleep(300);
   await menu.outer.screenshot({ path: join(out, "sheet-picked-380-light.png"), animations: "disabled" });
   await menu.app.click(".sheet-foot .primary");
-  await sleep(1500);
-  await menu.outer.screenshot({ path: join(out, "sheet-added-380-light.png") });
-  console.log("after add:", await menu.app.locator(".toast, .error").allInnerTexts(),
-    await first.app.locator(".line").allInnerTexts());
+  // Only an app on screen watches the basket; the menu has pushed the first one out of view.
+  await first.outer.scrollIntoViewIfNeeded();
   await first.app.waitForFunction(
     () => [...document.querySelectorAll(".line")].some((l) => l.textContent.includes("Mushy Peas"))
       && [...document.querySelectorAll(".line")].some((l) => l.textContent.includes("With the meal deal")),
