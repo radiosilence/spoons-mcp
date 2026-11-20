@@ -1,0 +1,68 @@
+{
+ "data": [
+  {
+   "franchise": "jdw",
+   "id": "34586",
+   "name": "Food",
+   "venueRef": 254,
+   "salesAreaId": 443,
+   "created": "2026-07-14T09:13:29.000000Z",
+   "updated": "2026-11-20T03:46:26.000000Z",
+   "description": "Food UK Core JUL26",
+   "image": "https://izoneapps-cdn.zonalconnect.com/uploads/2026/06/113311.jpeg",
+   "versionId": 765827,
+   "sortOrder": 39,
+   "canOrder": true,
+   "isSpecials": false,
+   "isHidden": false
+  },
+  {
+   "franchise": "jdw",
+   "id": "34585",
+   "name": "Drinks",
+   "venueRef": 254,
+   "salesAreaId": 443,
+   "created": "2026-07-14T09:13:16.000000Z",
+   "updated": "2026-11-20T03:46:25.000000Z",
+   "description": "Drinks Main JUL26",
+   "image": "https://izoneapps-cdn.zonalconnect.com/uploads/2026/08/117740.jpeg",
+   "versionId": 765794,
+   "sortOrder": 55,
+   "canOrder": true,
+   "isSpecials": false,
+   "isHidden": false
+  },
+  {
+   "franchise": "jdw",
+   "id": "13385",
+   "name": "Real Ales",
+   "venueRef": 254,
+   "salesAreaId": 443,
+   "created": "2021-09-20T15:02:58.000000Z",
+   "updated": "2026-11-20T03:46:23.000000Z",
+   "description": "Guest Ale Range - England/Wales",
+   "image": "https://izoneapps-cdn.zonalconnect.com/uploads/2025/06/92897.jpeg",
+   "versionId": 755483,
+   "sortOrder": 58,
+   "canOrder": true,
+   "isSpecials": false,
+   "isHidden": false
+  },
+  {
+   "franchise": "jdw",
+   "id": "24203",
+   "name": "Tea, Lavazza coffee and soft drinks",
+   "venueRef": 254,
+   "salesAreaId": 443,
+   "created": "2024-04-29T20:21:53.000000Z",
+   "updated": "2026-11-20T03:46:23.000000Z",
+   "description": "Hot & Soft Drinks Spr 24",
+   "image": "https://izoneapps-cdn.zonalconnect.com/uploads/2025/10/100626.jpeg",
+   "versionId": 762306,
+   "sortOrder": 64,
+   "canOrder": true,
+   "isSpecials": false,
+   "isHidden": false
+  }
+ ]
+}

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 spoons-api-client = { path = "../spoons-api-client" }
 anyhow.workspace = true
+async-graphql.workspace = true
 axum = "0.8"
 clap = { version = "4.6.7", features = ["derive"] }
 flate2.workspace = true
@@ -26,4 +27,8 @@ uuid = { version = "1", features = ["v4"] }
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+regex.workspace = true
 jiff = { version = "0.2.39", default-features = false, features = ["std", "tzdb-bundle-always"] }
+
+[dev-dependencies]
+wiremock = "0.6"

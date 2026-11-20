@@ -10,6 +10,7 @@ repository = "https://github.com/radiosilence/spoons-mcp"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
+async-graphql = { version = "7", features = ["dataloader"] }
 flate2 = "1"
 futures-util = "0.3"
 base64 = "0.23"
