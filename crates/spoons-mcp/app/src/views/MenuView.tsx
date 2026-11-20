@@ -4,7 +4,7 @@ import * as Q from "../queries";
 import { add, go, useStore } from "../store";
 import type { Hints, Kind, Menu, Portion, Product, PubCard, Section, View } from "../types";
 import { Abv, Glass, Icon, Pouring } from "../ui";
-import { OptionSheet } from "./OptionSheet";
+import { type Answers, OptionSheet } from "./OptionSheet";
 
 type MenuViewT = Extract<View, { screen: "menu" }>;
 
@@ -37,7 +37,9 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
   const [active, setActive] = useState<Kind | null>(null);
   const [afOnly, setAfOnly] = useState(false);
   const [showFood, setShowFood] = useState(false);
-  const [asking, setAsking] = useState<{ product: Product; portion: Portion } | null>(null);
+  // The sheet's answers live here, so a re-render that remounts the sheet (the layout switching between compact and
+  // full) keeps what was tapped.
+  const [asking, setAsking] = useState<{ product: Product; portion: Portion; answers: Answers } | null>(null);
   const [fullscreen, setFullscreen] = useState(app.getHostContext()?.displayMode === "fullscreen");
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -130,11 +132,19 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
 
   // Something that asks a question first (a mixer, a side), or a meal that comes with a drink, opens the sheet.
   const order = (p: Product, portion: Portion) => {
-    if (p.needsChoices || p.deals.some((d) => d.kind === "INCLUDES_DRINK")) setAsking({ product: p, portion });
+    if (p.needsChoices || p.deals.some((d) => d.kind === "INCLUDES_DRINK")) setAsking({ product: p, portion, answers: { picked: {}, drink: null } });
     else void add(view.pub, p, portion);
   };
   const sheet = asking && (
-    <OptionSheet pub={view.pub} table={table} product={asking.product} portion={asking.portion} onClose={() => setAsking(null)} />
+    <OptionSheet
+      pub={view.pub}
+      table={table}
+      product={asking.product}
+      portion={asking.portion}
+      answers={asking.answers}
+      onAnswer={(answers) => setAsking((a) => a && { ...a, answers })}
+      onClose={() => setAsking(null)}
+    />
   );
 
   // On a phone the host clips an inline app and gives vertical swipes to the chat, so a scrolling menu belongs in

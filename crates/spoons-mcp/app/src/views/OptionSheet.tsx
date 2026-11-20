@@ -7,19 +7,25 @@ import { Glass, Icon, Pouring } from "../ui";
 
 type Drink = Pick<Product, "id" | "name" | "kind" | "colour" | "needsChoices" | "portions">;
 
+/** What has been tapped: an option id per group, and the meal's drink. */
+export type Answers = { picked: Record<string, string>; drink: Drink | null };
+
 /** A product's questions, answered by tapping: a mixer, a side, peas; and for a meal deal, the drink. */
 export function OptionSheet(props: {
   pub: number;
   table: number | null;
   product: Product;
   portion: Portion;
+  answers: Answers;
+  onAnswer: (answers: Answers) => void;
   onClose: () => void;
 }) {
   const { product, portion } = props;
   const [groups, setGroups] = useState<OptionGroup[] | null>(null);
   const [drinks, setDrinks] = useState<Drink[]>([]);
-  const [picked, setPicked] = useState<Record<string, string>>({});
-  const [drink, setDrink] = useState<Drink | null>(null);
+  const { picked, drink } = props.answers;
+  const setPicked = (next: Record<string, string>) => props.onAnswer({ picked: next, drink });
+  const setDrink = (next: Drink | null) => props.onAnswer({ picked, drink: next });
   const [find, setFind] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
