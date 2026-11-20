@@ -38,7 +38,11 @@ pub struct Line {
     pub name: String,
     pub portion: String,
     pub quantity: u32,
+    /// As the till priced the line.
     pub price: Option<f64>,
+    /// One of the size as the menu priced it, for showing where the till differs.
+    #[serde(default)]
+    pub menu_price: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

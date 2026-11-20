@@ -1,0 +1,315 @@
+{
+ "data": {
+  "franchise": "jdw",
+  "id": 5350,
+  "venueRef": 254,
+  "name": "The Watch House",
+  "status": "open",
+  "subType": null,
+  "thumbnail": null,
+  "allergensUrl": "https://allergens.jdwetherspoon.com/?pubId=254&franchise=jdw",
+  "canPlaceOrder": true,
+  "comingSoon": false,
+  "contactDetails": {
+   "email": null,
+   "telephone": "020 8318 3136",
+   "website": null
+  },
+  "pricing": {
+   "includeDrink": {
+    "offset": 1.53,
+    "wineOffset": 0.9
+   }
+  },
+  "currency": {
+   "code": "GBP",
+   "currencyCode": "GBP",
+   "countryCode": "GB",
+   "symbol": "£",
+   "htmlName": "&pound;",
+   "htmlNumber": "&#163;"
+  },
+  "facilities": [
+   "Baby change",
+   "Licensed outside area",
+   "Step-free access",
+   "TV screens",
+   "Wi-Fi"
+  ],
+  "address": {
+   "location": {
+    "latitude": 51.459945,
+    "longitude": -0.01164,
+    "distanceTolerance": 25
+   },
+   "country": {
+    "name": "England",
+    "code": "GB"
+   },
+   "line1": "198–204 High Street",
+   "line2": null,
+   "line3": null,
+   "town": "Lewisham",
+   "county": "Lewisham",
+   "postcode": "SE13 6JP"
+  },
+  "openingTimes": {
+   "days": {
+    "mon": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": "Monday",
+     "isClosed": false
+    },
+    "tue": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": "Tuesday",
+     "isClosed": false
+    },
+    "wed": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": "Wednesday",
+     "isClosed": false
+    },
+    "thu": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": "Thursday",
+     "isClosed": false
+    },
+    "fri": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": "Friday",
+     "isClosed": false
+    },
+    "sat": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": "Saturday",
+     "isClosed": false
+    },
+    "sun": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": "Sunday",
+     "isClosed": false
+    }
+   },
+   "dates": {
+    "2025-12-11": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-12": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-13": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-14": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-15": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-16": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-17": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-18": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-19": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-20": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-21": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-22": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-23": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-24": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": "Christmas Eve",
+     "isClosed": false
+    },
+    "2025-12-25": {
+     "open": "11:00",
+     "close": "15:00",
+     "label": "Christmas Day",
+     "isClosed": false
+    },
+    "2025-12-26": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": "Boxing Day",
+     "isClosed": false
+    },
+    "2025-12-27": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-28": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-29": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-30": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    },
+    "2025-12-31": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": "New Year's Eve",
+     "isClosed": false
+    },
+    "2026-01-01": {
+     "open": "08:00",
+     "close": "00:00",
+     "label": "New Year's Day",
+     "isClosed": false
+    },
+    "2026-01-02": {
+     "open": "08:00",
+     "close": "01:00",
+     "label": null,
+     "isClosed": false
+    }
+   },
+   "children": {
+    "open": "08:00",
+    "close": "21:00",
+    "label": "Children",
+    "isClosed": false
+   }
+  },
+  "paymentConfig": {
+   "methods": {
+    "hosted": {
+     "label": "Continue to payment options",
+     "name": "hosted",
+     "enabled": false
+    },
+    "card": {
+     "label": "Debit/Credit card",
+     "name": "card",
+     "enabled": true
+    },
+    "applePay": {
+     "label": "Apple Pay",
+     "name": "applePay",
+     "enabled": true
+    },
+    "googlePay": {
+     "label": "Google Pay",
+     "name": "googlePay",
+     "enabled": true
+    },
+    "paypal": {
+     "label": "PayPal",
+     "name": "paypal",
+     "enabled": false
+    },
+    "payit": {
+     "label": "NatWest PayIt",
+     "name": "payit",
+     "enabled": true
+    }
+   },
+   "applePay": {
+    "merchantId": "merchant.com.jdwetherspoon.bnpp.main"
+   },
+   "googlePay": {
+    "merchantId": "08534776838790335418",
+    "gateway": "computop",
+    "gatewayMerchantId": "BNP_JDW_UK_ECOM"
+   }
+  },
+  "menuUrl": {
+   "dairyFree": null,
+   "glutenFree": null
+  },
+  "salesAreas": [
+   {
+    "id": 443,
+    "name": "Bar",
+    "friendly": null,
+    "description": null
+   },
+   {
+    "id": 444,
+    "name": "Garden",
+    "friendly": null,
+    "description": null
+   }
+  ],
+  "employeeDiscountAllowed": true,
+  "locale": "en-GB",
+  "orderingEnabled": true,
+  "isClosed": false,
+  "closureDates": null,
+  "type": "pub"
+ }
+}

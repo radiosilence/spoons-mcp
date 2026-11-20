@@ -1,6 +1,6 @@
 # spoons-mcp
 
-Client and command-line tool for the unofficial API behind Wetherspoon's order-and-pay app. `spoons-api-client` speaks the API; the `spoons` binary (crate `spoons-mcp`) dumps pubs and menus into `data/`, extracts prices and ranks pubs into tiers by what a round costs. The README explains the API's quirks. Releases publish the `spoons` binary, attached to GitHub releases, and the container image `ghcr.io/radiosilence/spoons-mcp` (the MCP server over HTTP, which jaritanet runs behind mcp-gateway); there are no crates.io packages.
+Client and command-line tool for the unofficial API behind Wetherspoon's order-and-pay app. `spoons-api-client` speaks the API; the `spoons` binary (crate `spoons-mcp`) dumps pubs and menus into `data/`, extracts prices, ranks pubs into tiers by what a round costs, and serves a GraphQL API for ordering to a table as an MCP server (`spoons_schema` and `spoons`, with the SDL snapshot in `crates/spoons-mcp/schema.graphql`; `UPDATE_SNAPSHOTS=1 cargo test` rewrites it). The README explains the API's quirks. Releases publish the `spoons` binary, attached to GitHub releases, and the container image `ghcr.io/radiosilence/spoons-mcp` (the MCP server over HTTP, which jaritanet runs behind mcp-gateway); there are no crates.io packages.
 
 ## Git
 

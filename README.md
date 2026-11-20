@@ -41,8 +41,9 @@ being the cheapest tenth and F the dearest twentieth; pubs charging the same sha
 
 ## MCP server
 
-`spoons mcp` serves tools over stdio for ordering to a table: `find_pubs`, `menu`, `quote`, `pay`, `order_status`,
-`cancel_order` and `send_duplicate`. For Claude Code:
+`spoons mcp` serves a GraphQL API over MCP, as two tools in the house style of its sibling servers:
+`spoons_schema` returns the SDL ([`crates/spoons-mcp/schema.graphql`](crates/spoons-mcp/schema.graphql)), and
+`spoons` runs a query or mutation, with variables as a JSON string. For Claude Code:
 
 ```console
 $ claude mcp add spoons --env SPOONS_EMAIL=you@example.com -- spoons mcp
@@ -50,14 +51,41 @@ $ claude mcp add spoons --env SPOONS_EMAIL=you@example.com -- spoons mcp
 
 `SPOONS_EMAIL` is where the receipt goes.
 
+The graph starts at `pubs(query:, near:)` or `pub(ref:)`. A pub has its hours, wait times, ale list and tables, and
+`menu(table:)`: everything the pub sells to that table, in kinds (cask ales, lager, craft and world beer, stout,
+cider, wine, spirits, cocktails, alcohol-free, soft and hot drinks, food), with each product's sizes and prices,
+ABV, units, calories, taste notes and colour read from the menu's prose, the guest ales picked out (they are named
+"Brewery - Beer" and never mention ale), and why anything that can't be ordered can't. A garden can be a sales area
+with its own menu and prices, which is why the table matters.
+
+Each MCP session has a basket on the server (`basketAdd`, `basketSet`, `basketRemove`, `basketClear`,
+`basketFromQuote` for "same again", `setTable`), so the model and anything rendering the results share one. `quote`
+prices the basket, or explicit items, at the till for a table and changes nothing. Nothing is quoted without a table,
+and the server never picks one. `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then CONFIRM: PREVIEW changes
+nothing and returns a token bound to its arguments, CONFIRM spends it, and the server instructions tell the model
+to confirm only on the user's explicit yes. `order(quoteId:, waitSecs:)` follows a payment.
+
+"Four pints of Abbot to table 4":
+
+```graphql
+{ pub(ref: 254) { menu(table: 4, search: "abbot") { products { nodes { id name portions { name price { formatted } } } } } } }
+
+mutation { basketAdd(pub: 254, table: 4, productId: "10000000315", portion: "Pint", quantity: 4) { basket { summary } }
+           quote { quote { id summary total { formatted } differsFromMenu } } }
+
+mutation { pay(quoteId: "d44e019b7a8e", action: PREVIEW) { preview confirmationToken } }
+# shown to the user; on their yes:
+mutation { pay(quoteId: "d44e019b7a8e", action: CONFIRM, confirmationToken: "…") { status paymentPage card question next } }
+```
+
 `spoons mcp --http 0.0.0.0:8080` serves the same tools over streamable HTTP at `/mcp`, which is how the image runs.
 Each request's `X-Spoons-Email` header gives its receipt address, and `SPOONS_EMAIL` is ignored: the server is
-shared, so a gateway in front injects each user's own,
-and `pay` returns the payment page as a link instead of opening it. The server authenticates nobody, so it belongs
-behind a proxy that does. `--state` says where quotes are kept; the image keeps them in the container, where losing
-them is safe: a quote that no longer exists can't be paid, and a payment nobody pays lapses. Ordering is two steps so the user sees the price before anything starts:
-`quote` prices the basket at the pub's till and changes nothing, and `pay` prepares the card payment and opens the
-payment page (BNP Paribas Axepta) in the browser, where the card is entered and the bank approves it.
+shared, so a gateway in front injects each user's own, and `pay` returns the payment page as a link instead of
+opening it. The server authenticates nobody, so it belongs behind a proxy that does. `--state` says where quotes are
+kept; the image keeps them in the container, where losing them is safe: a quote that no longer exists can't be paid,
+and a payment nobody pays lapses. Baskets and confirmation tokens are in memory and go with a restart, which only
+means building the basket or previewing again. The payment page is BNP Paribas Axepta's, where the card is entered
+and the bank approves it.
 
 Over HTTP, `pay` can enter a saved card itself. The card comes in four headers, `X-Spoons-Card-Number`,
 `X-Spoons-Card-Expiry` (`MM/YY`), `X-Spoons-Card-CVC` and `X-Spoons-Card-Name`, which a gateway in front keeps as
@@ -85,13 +113,14 @@ API needs to cancel a payment it started. The server is careful about the cases 
 - **A request to prepare or send a payment is never retried.** One that gets no clear answer may still have made the
   order, so the quote is marked unconfirmed and `pay` refuses it until the user has checked for a receipt or charge.
 - **Nothing cancels on its own.** Cancelling while the bank is authorising a card can leave a charge with no order,
-  so `cancel_order` only acts before a card is entered, or on an order held as a duplicate. The payment page cancels
+  so `cancelOrder` only acts before a card is entered, or on an order held as a duplicate. The payment page cancels
   itself if abandoned.
 - **Repeat orders are the user's call.** The payment API flags a basket that matches a recent order to the same
-  table, before payment (`pay` asks) or after it (the order is held, and `send_duplicate` or `cancel_order` settles
+  table, before payment (`pay` asks) or after it (the order is held, and `sendDuplicate` or `cancelOrder` settles
   it).
 
-Products that need a choice made, such as a spirit's mixer, can't be quoted yet.
+Products that need a choice made, such as a spirit's mixer or a meal's side, can't be quoted yet; the menu says
+which (`orderable`, `whyNot`).
 
 ## Things worth knowing about the API
 

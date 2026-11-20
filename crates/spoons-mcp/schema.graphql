@@ -1,0 +1,1032 @@
+"""
+A real ale from the pub's ale list.
+"""
+type Ale {
+	id: ID!
+	name: String!
+	brewery: String
+	"""
+	`Brewery - Name`, which is how the menu lists it.
+	"""
+	fullName: String
+	"""
+	`Dark brown/ruby` and so on.
+	"""
+	style: String
+	colour: Colour
+	abv: Float
+	"""
+	In a pint.
+	"""
+	units: Float
+	description: String
+	"""
+	Ordered in, not on yet.
+	"""
+	comingSoon: Boolean!
+	"""
+	The pub's price band for it, `A` cheapest.
+	"""
+	priceBand: String
+}
+
+"""
+What's being ordered in this conversation, kept by the server so the model and any app showing it agree.
+"""
+type Basket {
+	"""
+	The pub it's for, once something is in it or a table is set.
+	"""
+	pub: Pub
+	"""
+	The table it goes to. Only ever what the user said: null until `setTable`.
+	"""
+	table: Int
+	lines: [BasketLine!]!
+	"""
+	Items, counting quantities.
+	"""
+	count: Int!
+	"""
+	At the menu's prices. The till's total, which is what's charged, comes with `quote`.
+	"""
+	menuTotal: Money
+	"""
+	Goes up with every change.
+	"""
+	version: Int!
+	"""
+	Ready to quote: something in it, a table set, and every line on that table's menu.
+	"""
+	ready: Boolean!
+	"""
+	The basket in a sentence.
+	"""
+	summary: String!
+}
+
+"""
+A line in the basket.
+"""
+type BasketLine {
+	"""
+	What `basketRemove` and `basketSet` take: `<productId>:<portion>`.
+	"""
+	id: ID!
+	productId: ID!
+	name: String!
+	portion: String!
+	quantity: Int!
+	kind: Kind!
+	"""
+	One of it, at the menu's price for the basket's table.
+	"""
+	unitPrice: Money
+	lineTotal: Money
+	"""
+	Why it can't be quoted as it is.
+	"""
+	note: String
+}
+
+"""
+A basket change: whether it took, and the basket either way.
+"""
+type BasketResult {
+	success: Boolean!
+	error: String
+	"""
+	The basket after the change, or as it was when the change was refused.
+	"""
+	basket: Basket!
+}
+
+type Colour {
+	"""
+	`#63130e`.
+	"""
+	hex: String!
+	label: String!
+	source: ColourSource!
+}
+
+"""
+Where a colour came from, best first.
+"""
+enum ColourSource {
+	"""
+	The pub's ale list gives the beer's style and its colour.
+	"""
+	ALE_LIST
+	"""
+	Read from the description, such as "Mahogany coloured".
+	"""
+	DESCRIPTION
+	"""
+	Typical of the kind of drink, such as a stout's black.
+	"""
+	KIND
+}
+
+"""
+Two-step actions: look, then act with the token the look returned.
+"""
+enum ConfirmAction {
+	"""
+	Show what would happen and return a `confirmationToken`. Changes nothing.
+	"""
+	PREVIEW
+	"""
+	Do it, with the token from PREVIEW and the same arguments. Only on the user's explicit yes.
+	"""
+	CONFIRM
+}
+
+"""
+What a product is, as people ask for it.
+"""
+enum Kind {
+	"""
+	Real ale on hand pump, the pub's own and the guests.
+	"""
+	CASK_ALE
+	LAGER
+	"""
+	Keg craft beer and bottled world beers.
+	"""
+	CRAFT_AND_WORLD
+	STOUT
+	CIDER
+	"""
+	Wine, prosecco, sparkling and champagne.
+	"""
+	WINE
+	SPIRITS
+	"""
+	Cocktails, spritzes, premixed drinks, bombs and shots.
+	"""
+	COCKTAILS
+	"""
+	Alcohol-free and low-alcohol drinks (0.5% ABV or less).
+	"""
+	ALCOHOL_FREE
+	"""
+	Soft drinks, mixers and children's drinks.
+	"""
+	SOFT
+	"""
+	Tea, coffee and hot chocolate.
+	"""
+	HOT
+	"""
+	Meals, sides, desserts and bar snacks.
+	"""
+	FOOD
+	"""
+	Charity donations, pin badges and anything else.
+	"""
+	OTHER
+}
+
+"""
+A point, in degrees.
+"""
+type LatLng {
+	lat: Float!
+	lng: Float!
+}
+
+"""
+A point, in degrees: where the user is, for the nearest pubs.
+"""
+input LatLngInput {
+	lat: Float!
+	lng: Float!
+}
+
+"""
+One sales area's menu, as a table there gets it. Everything below it is free once it's read.
+"""
+type Menu {
+	pub: Pub!
+	"""
+	The table it is for, when one was given.
+	"""
+	table: Int
+	salesArea: Int!
+	"""
+	Products matching the menu's `search` and `kinds`.
+	"""
+	totalCount: Int!
+	"""
+	The menu by kind, in the order people usually read it: ales, beers, cider, wine, spirits, cocktails,
+	alcohol-free, soft and hot drinks, food. Empty kinds are left out.
+	"""
+	sections(
+		"""
+		Only these kinds.
+		"""
+		kinds: [Kind!]
+	): [MenuSection!]!
+	"""
+	Every matching product, in the pub's order. Cursors are product ids.
+	"""
+	products(
+		"""
+		Only products matching every word.
+		"""
+		search: String,		kinds: [Kind!],
+		"""
+		Only guest ales.
+		"""
+		guestOnly: Boolean! = false,
+		"""
+		Only what can be ordered now.
+		"""
+		orderableOnly: Boolean! = false,
+		"""
+		Page size, 50 when not given, at most 300.
+		"""
+		first: Int,		after: String
+	): ProductConnection!
+	"""
+	The guest real ales on now: the rotating casks, named "Brewery - Beer", that a search for "ale" misses.
+	"""
+	guestAles: [Product!]!
+	"""
+	Real ales ordered in and not on yet. Not orderable.
+	"""
+	comingSoon: [Ale!]!
+	"""
+	One product by id, whatever the menu's filters.
+	"""
+	product(id: ID!): Product
+}
+
+"""
+One kind's products on a menu.
+"""
+type MenuSection {
+	kind: Kind!
+	"""
+	`Cask ales`, `Alcohol-free` and so on.
+	"""
+	label: String!
+	count: Int!
+	"""
+	In the pub's own order, guest ales first among cask ales.
+	"""
+	products(
+		"""
+		At most this many.
+		"""
+		first: Int
+	): [Product!]!
+}
+
+"""
+An amount of money.
+"""
+type Money {
+	amount: Float!
+	"""
+	ISO 4217: `GBP`, or `EUR` at the six pubs in the Republic of Ireland.
+	"""
+	currency: String!
+	"""
+	Ready to show: `£4.49`.
+	"""
+	formatted: String!
+}
+
+"""
+Changes. The basket's are this conversation's own; `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then
+CONFIRM, and CONFIRM only on the user's explicit yes.
+"""
+type MutationRoot {
+	"""
+	Adds a product to this conversation's basket, priced from the basket's table's menu. Adding the same size
+	again raises its quantity. The first add needs `pub`; `table` sets the table too, but only pass one the user
+	gave. Free once the menu is read (see `Pub.menu` for that cost).
+	"""
+	basketAdd(
+		"""
+		The pub's ref. Needed for the first item; must match after that.
+		"""
+		pub: Int,
+		"""
+		The user's table number, if they've said it.
+		"""
+		table: Int,		productId: ID!,
+		"""
+		A size's label or name, such as `Pint`; the default size when not given.
+		"""
+		portion: String,		quantity: Int! = 1
+	): BasketResult!
+	"""
+	Takes `quantity` off a basket line, or the whole line when not given. Free.
+	"""
+	basketRemove(
+		"""
+		The line's `id` from the basket.
+		"""
+		lineId: ID!,		quantity: Int
+	): BasketResult!
+	"""
+	Sets a line's quantity; 0 removes it. Name the line by `lineId`, or by `productId` and `portion` to add
+	it at that quantity if it isn't there. Free once the menu is read.
+	"""
+	basketSet(lineId: ID, productId: ID, portion: String, quantity: Int!): BasketResult!
+	"""
+	Empties the basket, keeping its pub and table. Free.
+	"""
+	basketClear: BasketResult!
+	"""
+	Fills the basket with a quote's lines, at the quote's pub and table: "same again". Replaces what was in it.
+	Free once the menu is read.
+	"""
+	basketFromQuote(quoteId: ID!): BasketResult!
+	"""
+	Sets the table the basket goes to, checking it exists and is taking orders, and re-prices the basket from
+	that table's menu (a garden can have its own prices). Only a table the user gave: never guess one. One
+	request for the table list, plus the menu if that sales area's isn't read yet.
+	"""
+	setTable(		table: Int!,
+		"""
+		The pub's ref, when the basket doesn't have one yet.
+		"""
+		pub: Int
+	): BasketResult!
+	"""
+	Prices an order at the pub's till for a table, from `items` or else from the basket. Changes nothing at
+	the pub. Show the user the lines, total and table, then on their yes preview and confirm `pay`. A table
+	is required: ask the user rather than guess. Requests: the table list, the menu if not read today, and the
+	till.
+	"""
+	quote(
+		"""
+		The pub's ref; the basket's when not given.
+		"""
+		pub: Int,
+		"""
+		The user's table; the basket's when not given.
+		"""
+		table: Int,
+		"""
+		What to quote; the basket when not given.
+		"""
+		items: [QuoteItemInput!]
+	): QuoteResult!
+	"""
+	Pays for a quote: PREVIEW, show the user the preview, and only on their explicit yes CONFIRM with the
+	token. With a saved card CONFIRM enters it and reports how the payment went; otherwise it returns the
+	payment page, where the user enters their card. The bank may ask the user to approve in their banking app:
+	follow with `order(quoteId, waitSecs)`. Never starts a second payment for one quote, and never enters the
+	card twice. `confirmDuplicate` only after the user has said they want a repeat of a recent order.
+	"""
+	pay(		quoteId: ID!,		action: ConfirmAction!,		confirmationToken: String,		confirmDuplicate: Boolean! = false,
+		"""
+		Open the payment page in the browser again (stdio on macOS only).
+		"""
+		reopen: Boolean! = false
+	): PayResult!
+	"""
+	Cancels a quote's payment: PREVIEW, then CONFIRM on the user's yes. Only possible before a card is entered,
+	or when the order is held as a duplicate; cancelling while a card is being authorised could leave a charge
+	with no order, so it is refused then.
+	"""
+	cancelOrder(quoteId: ID!, action: ConfirmAction!, confirmationToken: String): OrderActionResult!
+	"""
+	Sends an order held as a repeat of a recent one (status DUPLICATE) to the pub anyway: PREVIEW, then CONFIRM
+	only when the user has said they want it. Sends it at most once.
+	"""
+	sendDuplicate(quoteId: ID!, action: ConfirmAction!, confirmationToken: String): OrderActionResult!
+}
+
+"""
+The time in London.
+"""
+type Now {
+	"""
+	RFC 3339 with the offset: `2026-11-20T18:04:00+00:00`.
+	"""
+	iso: String!
+	"""
+	`18:04`.
+	"""
+	time: String!
+	"""
+	`2026-11-20`.
+	"""
+	date: String!
+	"""
+	`Friday`.
+	"""
+	weekday: String!
+}
+
+type OpeningHours {
+	"""
+	`08:00`.
+	"""
+	opens: String
+	"""
+	`00:00`, which is midnight.
+	"""
+	closes: String
+	closed: Boolean!
+}
+
+"""
+An order: a quote and where its payment has got to.
+"""
+type Order {
+	quote: Quote!
+	status: OrderStatus!
+	"""
+	What the status means for the user, and what to do next.
+	"""
+	meaning: String!
+	"""
+	The pub's order number, once placed.
+	"""
+	orderRef: String
+	placedAt: String
+	"""
+	The payment page, while it waits for a card.
+	"""
+	paymentPage: String
+	"""
+	The payment API's own words, for a state this server doesn't know.
+	"""
+	detail: String
+}
+
+"""
+What `cancelOrder` or `sendDuplicate` previewed or did.
+"""
+type OrderActionResult {
+	success: Boolean!
+	action: ConfirmAction!
+	preview: String
+	confirmationToken: String
+	order: Order
+	error: String
+}
+
+"""
+Where an order has got to.
+"""
+enum OrderStatus {
+	"""
+	Quoted; `pay` hasn't been confirmed.
+	"""
+	NOT_STARTED
+	"""
+	A request to start the payment was being sent when this was read.
+	"""
+	PREPARING
+	"""
+	Starting the payment got no clear answer. Nobody can pay a payment started that way; `pay` can be confirmed
+	again.
+	"""
+	UNCONFIRMED
+	"""
+	Waiting for the card on the payment page.
+	"""
+	PENDING
+	"""
+	The card is being authorised; the user may need to approve it in their banking app.
+	"""
+	IN_PROGRESS
+	"""
+	Paid for, being sent to the pub.
+	"""
+	PAID
+	"""
+	Paid for and sent to the pub.
+	"""
+	PLACED
+	"""
+	Held back as a repeat of a recent order to this table: `sendDuplicate` or `cancelOrder`, on the user's word.
+	"""
+	DUPLICATE
+	CANCELLED
+	"""
+	A state this server doesn't know; see `detail`.
+	"""
+	UNKNOWN
+}
+
+"""
+Information about pagination in a connection
+"""
+type PageInfo {
+	"""
+	When paginating backwards, are there more items?
+	"""
+	hasPreviousPage: Boolean!
+	"""
+	When paginating forwards, are there more items?
+	"""
+	hasNextPage: Boolean!
+	"""
+	When paginating backwards, the cursor to continue.
+	"""
+	startCursor: String
+	"""
+	When paginating forwards, the cursor to continue.
+	"""
+	endCursor: String
+}
+
+"""
+What `pay` previewed or did.
+"""
+type PayResult {
+	success: Boolean!
+	action: ConfirmAction!
+	"""
+	PREVIEW: what CONFIRM will do. Show it to the user.
+	"""
+	preview: String
+	"""
+	PREVIEW: what CONFIRM takes.
+	"""
+	confirmationToken: String
+	quote: Quote
+	"""
+	CONFIRM: where the payment is.
+	"""
+	status: OrderStatus
+	"""
+	CONFIRM: the page where the user enters their card, when there's no saved card.
+	"""
+	paymentPage: String
+	openedInBrowser: Boolean!
+	"""
+	CONFIRM: how entering the saved card went.
+	"""
+	card: String
+	"""
+	CONFIRM: a question for the user, such as whether a repeat order is wanted. Ask it; do nothing else.
+	"""
+	question: String
+	"""
+	What to do next.
+	"""
+	next: String
+	error: String
+}
+
+"""
+One size a product comes in, with its price at this table.
+"""
+type Portion {
+	"""
+	As the menu labels it, which is what `portion` arguments match: `250ml glass (185 kcal, 3.0 units)`.
+	"""
+	label: String!
+	"""
+	The size alone: `250ml glass`, `Pint`, `Double`.
+	"""
+	name: String!
+	price: Money!
+	isDefault: Boolean!
+	millilitres: Float
+	"""
+	Alcohol units, from the label or worked out from the ABV and size.
+	"""
+	units: Float
+	kcal: Float
+}
+
+"""
+Something on a menu, with what could be read from its description.
+"""
+type Product {
+	"""
+	What `basketAdd` and `quote` take.
+	"""
+	id: ID!
+	"""
+	As the menu has it: `Rooster’s - Scoundrel`.
+	"""
+	name: String!
+	"""
+	Without the brewery, for a guest ale: `Scoundrel`.
+	"""
+	shortName: String!
+	brewery: String
+	kind: Kind!
+	"""
+	A guest real ale, as opposed to one the pub always has.
+	"""
+	guest: Boolean!
+	"""
+	The pub's own category for it, and the group within: `Wine, prosecco & sparkling` / `Red wine`.
+	"""
+	category: String!
+	group: String
+	description: String
+	"""
+	Read from the description, best-effort: `roasted`, `chocolaty`.
+	"""
+	tasteNotes: [String!]!
+	"""
+	For a wine, where it's from.
+	"""
+	origin: String
+	"""
+	A real ale's style from the ale list.
+	"""
+	style: String
+	"""
+	Percent.
+	"""
+	abv: Float
+	"""
+	Alcohol units in the default size.
+	"""
+	units: Float
+	"""
+	Calories in the default size.
+	"""
+	kcal: Float
+	"""
+	The drink's colour, from the ale list, the description, or what's typical of its kind.
+	"""
+	colour: Colour
+	portions: [Portion!]!
+	defaultPortion: Portion
+	"""
+	Can be put in a basket and quoted now.
+	"""
+	orderable: Boolean!
+	"""
+	Why not, when it can't: out of stock, or a spirit's mixer choice, which can't be ordered here yet.
+	"""
+	whyNot: String
+	outOfStock: Boolean!
+	"""
+	Allergens as the menu tags them: `gluten`, `milk`.
+	"""
+	allergens: [String!]!
+	vegan: Boolean!
+	"""
+	Sold to over-18s only.
+	"""
+	ageRestricted: Boolean!
+}
+
+type ProductConnection {
+	"""
+	Information to aid in pagination.
+	"""
+	pageInfo: PageInfo!
+	"""
+	A list of edges.
+	"""
+	edges: [ProductEdge!]!
+	"""
+	A list of nodes.
+	"""
+	nodes: [Product!]!
+	"""
+	How many match, before paging.
+	"""
+	totalCount: Int!
+}
+
+"""
+An edge in a connection.
+"""
+type ProductEdge {
+	"""
+	The item at the end of the edge
+	"""
+	node: Product!
+	"""
+	A cursor for use in pagination
+	"""
+	cursor: String!
+}
+
+"""
+A Wetherspoon's pub.
+
+Its name, address, status and location come from the pub list, read once and kept, so they cost nothing.
+Everything else says what it costs.
+"""
+type Pub {
+	"""
+	The pub's venue ref, which everything else takes as `pub`.
+	"""
+	ref: Int!
+	name: String!
+	town: String
+	postcode: String
+	"""
+	The street address on one line.
+	"""
+	address: String!
+	country: String!
+	"""
+	`open`, `closed_temporary`, `closing_temporary` or `opening_soon`, as the pub list has it. Free.
+	"""
+	status: String!
+	"""
+	Trading, as opposed to closed for a refit or for good. Not whether it's open at this hour: see `openNow`.
+	Free.
+	"""
+	trading: Boolean!
+	location: LatLng
+	"""
+	From `near`, when `pubs` was given one. Straight-line metres.
+	"""
+	distanceMetres: Float
+	"""
+	`GBP`, or `EUR` in the Republic of Ireland.
+	"""
+	currency: String!
+	"""
+	Today's opening hours. One request per pub, shared with `facilities`, `openNow`, `canOrder` and
+	`salesAreas`.
+	"""
+	hoursToday: OpeningHours
+	"""
+	Open at this moment, by today's hours in London. Same request as `hoursToday`.
+	"""
+	openNow: Boolean
+	"""
+	Takes orders through the app. Same request as `hoursToday`.
+	"""
+	canOrder: Boolean
+	"""
+	`Step-free access`, `Wi-Fi` and so on. Same request as `hoursToday`.
+	"""
+	facilities: [String!]
+	"""
+	The parts of the pub with their own menus. Same request as `hoursToday`.
+	"""
+	salesAreas: [SalesArea!]
+	"""
+	How long food and drink are taking now. One request, live; null when the pub doesn't say.
+	"""
+	waitTimes: WaitTimes
+	"""
+	The real ales on now and those coming soon, with their styles and colours. One request; null when the
+	list couldn't be read, which isn't the same as none on.
+	"""
+	ales: [Ale!]
+	"""
+	Its tables. One request; null when they couldn't be read.
+	"""
+	tables(
+		"""
+		Only those taking orders now.
+		"""
+		availableOnly: Boolean! = false
+	): [Table!]
+	"""
+	Everything the pub sells to a table, sorted into kinds, with sizes and prices. Parts of a pub such as a
+	garden can have their own menu and prices, so pass the `table` being ordered to when there is one.
+	
+	Cost: the first read of a sales area each day fetches its menus, about eight requests and several
+	megabytes, plus one for the table list when `table` is given; after that it's free until midnight in
+	London. Filtering, searching and paging are free.
+	"""
+	menu(
+		"""
+		The table being ordered to. Without it, the pub's main menu.
+		"""
+		table: Int,
+		"""
+		Only products matching every word, in name, brewery, style, category or taste notes.
+		"""
+		search: String,
+		"""
+		Only these kinds.
+		"""
+		kinds: [Kind!]
+	): Menu!
+}
+
+type PubConnection {
+	"""
+	Information to aid in pagination.
+	"""
+	pageInfo: PageInfo!
+	"""
+	A list of edges.
+	"""
+	edges: [PubEdge!]!
+	"""
+	A list of nodes.
+	"""
+	nodes: [Pub!]!
+	"""
+	How many match, before paging.
+	"""
+	totalCount: Int!
+}
+
+"""
+An edge in a connection.
+"""
+type PubEdge {
+	"""
+	The item at the end of the edge
+	"""
+	node: Pub!
+	"""
+	A cursor for use in pagination
+	"""
+	cursor: String!
+}
+
+"""
+Reads. Each field says what it costs in requests to Wetherspoon's.
+"""
+type QueryRoot {
+	"""
+	The time in London. Free: no request.
+	"""
+	now: Now!
+	"""
+	Pubs by name, town or postcode, or nearest first to a point, or both. Closed-for-good pubs are left out.
+	The pub list is one request, read once and kept; everything here is free after that. Cursors are pub refs.
+	"""
+	pubs(
+		"""
+		Part of a pub's name, town or postcode; every word must match.
+		"""
+		query: String,
+		"""
+		Lists the nearest first, with `distanceMetres`.
+		"""
+		near: LatLngInput,
+		"""
+		Page size, 5 when not given, at most 50.
+		"""
+		first: Int,		after: String
+	): PubConnection!
+	"""
+	One pub by its ref. Free once the pub list is in.
+	"""
+	pub(ref: Int!): Pub
+	"""
+	This conversation's basket. Free.
+	"""
+	basket(
+		"""
+		Wait up to this many seconds (at most 25) for the basket to change from this `version` before answering. For a view keeping itself current; the model has no reason to wait.
+		"""
+		changedFrom: Int,		waitSecs: Int! = 20
+	): Basket!
+	"""
+	A quote by id. Free: quotes are kept by this server.
+	"""
+	quote(id: ID!): Quote
+	"""
+	The quotes made in this conversation, newest first: what "same again" repeats. Free.
+	"""
+	quotes: [Quote!]!
+	"""
+	A quote's order and where its payment has got to. One request to the payment API once paying has started,
+	and one every five seconds while waiting.
+	"""
+	order(
+		"""
+		The quote id.
+		"""
+		quoteId: ID!,
+		"""
+		Wait up to this many seconds (at most 55) for the payment to finish or need the user before answering.
+		"""
+		waitSecs: Int
+	): Order!
+}
+
+"""
+A basket priced at the pub's till for a table. Quoting changes nothing at the pub.
+"""
+type Quote {
+	"""
+	The quote id, which `pay`, `order`, `cancelOrder` and `sendDuplicate` take.
+	"""
+	id: ID!
+	"""
+	The pub's ref.
+	"""
+	pubRef: Int!
+	pubName: String!
+	table: Int!
+	lines: [QuoteLine!]!
+	"""
+	What will be charged, from the till.
+	"""
+	total: Money!
+	"""
+	The same lines at the menu's prices, when every line had one.
+	"""
+	menuTotal: Money
+	"""
+	The till charges something other than the menu says.
+	"""
+	differsFromMenu: Boolean!
+	"""
+	When it was quoted, in London.
+	"""
+	createdAt: String!
+	"""
+	Where its payment is, as this server last recorded it. Free; `order` asks the payment API.
+	"""
+	status: OrderStatus!
+	"""
+	The quote in a sentence, with any difference between till and menu.
+	"""
+	summary: String!
+}
+
+input QuoteItemInput {
+	productId: ID!
+	"""
+	A size's label or name, such as `Pint` or `Half pint`, any case; the default size when not given.
+	"""
+	portion: String
+	quantity: Int! = 1
+}
+
+"""
+One line of a quote.
+"""
+type QuoteLine {
+	productId: ID!
+	name: String!
+	portion: String!
+	quantity: Int!
+	"""
+	As the till priced the line.
+	"""
+	tillPrice: Money
+	"""
+	One of it as the menu priced it.
+	"""
+	menuPrice: Money
+}
+
+"""
+A quote, or why there isn't one.
+"""
+type QuoteResult {
+	success: Boolean!
+	error: String
+	quote: Quote
+}
+
+type SalesArea {
+	id: Int!
+	"""
+	Usually `Bar`; a garden or a hotel lounge can be a sales area with its own menu and prices.
+	"""
+	name: String!
+}
+
+type Table {
+	number: Int!
+	name: String
+	"""
+	Taking orders now.
+	"""
+	available: Boolean!
+	"""
+	The sales area it orders from, whose menu and prices apply.
+	"""
+	salesArea: Int!
+}
+
+"""
+Minutes an order is taking now.
+"""
+type WaitTimes {
+	foodMinutes: Int
+	drinkMinutes: Int
+	"""
+	The pub's local time, as the API gives it.
+	"""
+	updatedAt: String
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: QueryRoot
+	mutation: MutationRoot
+}

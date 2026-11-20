@@ -152,6 +152,12 @@ impl Client {
         self
     }
 
+    /// Sends payments to another base URL than the one the bundle names, such as a test server's.
+    pub fn with_payments_base(mut self, base: &str) -> Self {
+        self.payments_base = base.trim_end_matches('/').to_owned();
+        self
+    }
+
     async fn pace(&self) {
         let mut next = self.next.lock().await;
         let now = Instant::now();

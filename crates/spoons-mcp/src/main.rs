@@ -5,11 +5,16 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use spoons_api_client::Client;
 
+mod catalogue;
 mod dump;
+mod graphql;
 mod mcp;
 mod orders;
 mod prices;
+mod service;
+mod session;
 mod tiers;
+mod tokens;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -40,7 +45,7 @@ enum Command {
         #[arg(long, default_value = "data")]
         data: PathBuf,
     },
-    /// Serve the MCP tools for finding a pub, reading its menu and ordering to a table, over stdio.
+    /// Serve the GraphQL API for finding a pub, reading its menu and ordering to a table as MCP tools, over stdio.
     Mcp {
         /// Serve over streamable HTTP at `/mcp` on this address instead, such as `0.0.0.0:8080`. Each request's
         /// `X-Spoons-Email` header says where its receipt goes; `SPOONS_EMAIL` is ignored. Only behind a proxy that authenticates callers.
