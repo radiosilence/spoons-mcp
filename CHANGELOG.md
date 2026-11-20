@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- **Product options and meal deals.** `menu` lists each product's option groups (sides, peas, mixers) with ids, labels and prices, and the meal deals it belongs to; `quote` and `basketAdd` take options by id or by what was said ("chips", "mushy peas", "neat"), refuse a missing or unknown choice with the valid ones listed, and add a meal's included drink, with the deal's saving on the quote. The app asks with a sheet of choices and a drink picker.
+- **The menu as Markdown.** `pub { menu { markdown } }` gives the whole menu, or the part `kinds` and `search` pick, as Markdown with sizes, prices, guest ales, options and deals; with no `ref` or `table` it's the conversation's pub and table, so "a markdown menu of the pub I'm in" is one query.
+
+### Changed
+
+- **Search finds what was said, not just what's printed.** Pubs and products match misheard words, brand styling ("sumo" finds Mad Squirrel $umo) and what a drink is ("mocktail" finds the 0% cocktails), across name, the pub's own category, description and notes, ranked best first with close matches when nothing fits exactly; the menu lists the pub's own categories and filters by them.
+- **The table sticks.** Once a table is given it serves every later order in the conversation: a quote remembers its pub and table, a quote with no table uses them, and the model asks again only when the user says they've moved, orders at another pub, or comes back hours later. "And pay" with an order quotes and pays in one go. Every quote line now carries the till's price; a guest ale's line was coming back without one.
+
+### Internal
+
+- **jiff 1.0.** The cargo group moves to jiff 1.0, whose `to_zoned` is now `to_zoned_datetime`.
+
 ## 0.4.0
 
 ### Added
