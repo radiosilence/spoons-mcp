@@ -1,0 +1,1 @@
+- **The order summary sits above Confirm payment on a phone too.** The compact quote card shows its lines, the first five of a long round, rather than only the total and table.
