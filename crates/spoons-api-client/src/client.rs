@@ -75,10 +75,16 @@ struct Envelope<T> {
 }
 
 impl Client {
-    /// Reads the key from the app's bundle, or from `SPOONS_API_KEY` when set.
+    /// Reads the key from the app's bundle, or from `SPOONS_API_KEY` when set. With the key set, `SPOONS_API_BASE`
+    /// and `SPOONS_PAYMENTS_BASE` point the two APIs elsewhere, such as at a server of fixtures for testing.
     pub async fn discover() -> Result<Self, Error> {
         if let Ok(key) = std::env::var("SPOONS_API_KEY") {
-            return Self::new(&key, DEFAULT_BASE, APP_VERSION);
+            let base = std::env::var("SPOONS_API_BASE").unwrap_or_else(|_| DEFAULT_BASE.to_owned());
+            let client = Self::new(&key, &base, APP_VERSION)?;
+            return Ok(match std::env::var("SPOONS_PAYMENTS_BASE") {
+                Ok(payments) => client.with_payments_base(&payments),
+                Err(_) => client,
+            });
         }
         let http = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
         let shell = http
