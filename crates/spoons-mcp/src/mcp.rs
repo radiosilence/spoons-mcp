@@ -169,15 +169,24 @@ impl Spoons {
         let response = self
             .execute_in(session.clone(), caller, &req.query, &variables)
             .await;
-        let mut structured = serde_json::to_value(&response).unwrap_or_default();
-        let text = serde_json::to_string_pretty(&structured)
-            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+        let body = serde_json::to_value(&response).unwrap_or_default();
         let hints = req.ui.clone().unwrap_or_default();
-        let data = structured.get("data").cloned().unwrap_or_default();
-        structured["view"] = crate::ui::view(&req.query, &variables, &data, &hints)
-            .unwrap_or(serde_json::Value::Null);
-        structured["ui"] = serde_json::to_value(&hints).unwrap_or_default();
-        structured["session"] = serde_json::Value::String(session.id.clone());
+        // The app's own calls answer it once, compactly: a menu is hundreds of kilobytes, and hosts stop handing
+        // large results to apps. The model's calls read as before, and carry for the app only what screen fits,
+        // since the structured copy isn't shown to the model and the app reads its own data.
+        let for_app = hints.view == Some(crate::ui::ViewMode::None);
+        let text = if for_app {
+            serde_json::to_string(&body)
+        } else {
+            serde_json::to_string_pretty(&body)
+        }
+        .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
+        let data = body.get("data").cloned().unwrap_or_default();
+        let structured = serde_json::json!({
+            "view": crate::ui::view(&req.query, &variables, &data, &hints),
+            "ui": hints,
+            "session": session.id,
+        });
         let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
         result.structured_content = Some(structured);
         result
