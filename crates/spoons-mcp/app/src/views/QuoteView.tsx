@@ -99,9 +99,9 @@ export function QuoteView({
         </div>
       </header>
 
-      {!compact && (
-        <ul class="quote-lines">
-          {quote.lines.map((l, i) => {
+      {/* What's being paid for, always: the button below is the acceptance. A long round shows its first lines. */}
+      <ul class="quote-lines">
+          {(compact && quote.lines.length > 6 ? quote.lines.slice(0, 5) : quote.lines).map((l, i) => {
             const each = l.menuPrice;
             const till = l.tillPrice;
             const menuLine = each ? each.amount * l.quantity : null;
@@ -119,8 +119,10 @@ export function QuoteView({
               </li>
             );
           })}
-        </ul>
-      )}
+        {compact && quote.lines.length > 6 && (
+          <li class="muted small">and {quote.lines.length - 5} more</li>
+        )}
+      </ul>
 
       <Tracker status={status} order={order} />
 
