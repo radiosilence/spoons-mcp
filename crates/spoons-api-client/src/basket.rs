@@ -17,7 +17,9 @@ pub enum LineError {
     },
     #[error("a quantity of nothing")]
     NoQuantity,
-    #[error("{0} needs a choice made, such as a mixer, which isn't supported yet")]
+    #[error(
+        "{0} needs a choice made (a mixer, a side or a sauce), which can't be ordered here yet"
+    )]
     NeedsChoice(String),
 }
 
