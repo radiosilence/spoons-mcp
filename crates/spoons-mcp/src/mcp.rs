@@ -106,7 +106,28 @@ pub struct GraphqlRequest {
     pub variables: Option<String>,
     /// How hosts that show the Wetherspoon's app should present this result. Optional; leave it out unless the
     /// user wants something particular on screen.
+    #[serde(default, deserialize_with = "lenient_hints")]
     pub ui: Option<crate::ui::Hints>,
+}
+
+/// `ui` as an object, or as a JSON string the way `variables` goes, which models do by habit. Hints only steer
+/// the app, so ones that can't be read are dropped rather than failing the call.
+fn lenient_hints<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::ui::Hints>, D::Error> {
+    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+    let value = match value {
+        serde_json::Value::String(text) if text.trim().is_empty() => return Ok(None),
+        serde_json::Value::String(text) => match serde_json::from_str(&text) {
+            Ok(parsed) => parsed,
+            Err(_) => return Ok(None),
+        },
+        other => other,
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(serde_json::from_value(value).ok())
 }
 
 impl Spoons {
