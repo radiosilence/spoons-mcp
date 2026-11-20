@@ -310,6 +310,22 @@ type Menu {
 		first: Int,		after: String
 	): ProductConnection!
 	"""
+	The whole menu (or the part `search` and `kinds` pick) as Markdown, for reading or saving: a heading per
+	kind, then each product with its strength, sizes and prices, guest ales first. Things that can't be ordered
+	here say why; products that ask a question (a side, a mixer) and meal deals say so. Free once the menu is
+	read. For "send me the menu", "a markdown menu of the pub I'm in".
+	"""
+	markdown(
+		"""
+		Only these kinds.
+		"""
+		kinds: [Kind!],
+		"""
+		Group by the pub's own categories ("Soft drinks", "Pub classics") rather than kinds.
+		"""
+		byCategory: Boolean! = false
+	): String!
+	"""
 	The pub's own menu categories, as its app lists them ("0% cocktails", "Soft drinks", "Spritz cocktails"),
 	with each one's kind and how many products are in it. Pass a name to `products(category:)`. Free.
 	"""
@@ -973,7 +989,7 @@ type Pub {
 	"""
 	menu(
 		"""
-		The table being ordered to. Without it, the pub's main menu.
+		The table being ordered to. Without it, the conversation's table at this pub, else the pub's main menu.
 		"""
 		table: Int,
 		"""
@@ -1052,9 +1068,15 @@ type QueryRoot {
 		first: Int,		after: String
 	): PubConnection!
 	"""
-	One pub by its ref. Free once the pub list is in.
+	One pub by its ref, or without one, the pub this conversation is ordering at ("the pub I'm in"). Free once
+	the pub list is in.
 	"""
-	pub(ref: Int!): Pub
+	pub(
+		"""
+		From `pubs`; the conversation's pub when not given.
+		"""
+		ref: Int
+	): Pub
 	"""
 	This conversation's basket. Free.
 	"""

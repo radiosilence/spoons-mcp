@@ -430,7 +430,9 @@ impl Pub {
     async fn menu(
         &self,
         ctx: &Context<'_>,
-        #[graphql(desc = "The table being ordered to. Without it, the pub's main menu.")]
+        #[graphql(
+            desc = "The table being ordered to. Without it, the conversation's table at this pub, else the pub's main menu."
+        )]
         table: Option<i32>,
         #[graphql(
             desc = "Only products matching every word, in name, brewery, style, category or taste notes."
@@ -443,7 +445,24 @@ impl Pub {
             .map(|t| u32::try_from(t).map_err(|_| gql("a table number is positive")))
             .transpose()?;
         let pub_ref = self.pub_ref();
-        let area = service.sales_area(&pub_ref, table).await.map_err(gql)?;
+        // Without a table, the conversation's at this pub, in the area the basket already has for it: no table
+        // list to read, and no failure when that table has since stopped taking orders.
+        let here = ctx
+            .data_unchecked::<Arc<crate::session::Session>>()
+            .basket();
+        let inherited = match (table, &here.pub_ref, here.table, here.sales_area) {
+            (None, Some(p), Some(t), Some(area)) if p.venue_ref == pub_ref.venue_ref => {
+                Some((t, area))
+            }
+            _ => None,
+        };
+        let (table, area) = match inherited {
+            Some((t, area)) => (Some(t), area),
+            None => (
+                table,
+                service.sales_area(&pub_ref, table).await.map_err(gql)?,
+            ),
+        };
         let catalogue = service.catalogue(&pub_ref, area).await.map_err(gql)?;
         Ok(Menu {
             pub_: self.clone(),
@@ -560,6 +579,120 @@ impl Menu {
                 && search.is_none_or(|s| crate::search::product_matches(s, e))
         })
     }
+}
+
+impl Menu {
+    fn to_markdown(&self, kinds: Option<&[Kind]>, by_category: bool) -> String {
+        let currency = self.pub_.currency_code();
+        let money = |amount: f64| Money::new(amount, currency).formatted;
+        let mut out = format!("# {}", escape_markdown(&self.pub_.venue.name));
+        if let Some(t) = self.table {
+            out.push_str(&format!(" · table {t}"));
+        }
+        out.push_str(&format!(
+            "\n\n_Menu prices for {} on {}; the till's price is what's charged._\n",
+            self.table
+                .map_or_else(|| "the main area".to_owned(), |t| format!("table {t}")),
+            crate::service::london_today()
+        ));
+        let mut entries: Vec<&Entry> = self.matching(None, kinds).collect();
+        let mut groups: Vec<(String, Vec<&Entry>)> = Vec::new();
+        if by_category {
+            entries.sort_by_key(|e| e.position);
+            for e in entries {
+                match groups.iter_mut().find(|(name, _)| *name == e.category) {
+                    Some((_, list)) => list.push(e),
+                    None => groups.push((e.category.clone(), vec![e])),
+                }
+            }
+        } else {
+            for kind in Kind::ALL {
+                let mut list: Vec<&Entry> =
+                    entries.iter().copied().filter(|e| e.kind == kind).collect();
+                list.sort_by_key(|e| (!e.guest, e.position));
+                if !list.is_empty() {
+                    groups.push((kind.label().to_owned(), list));
+                }
+            }
+        }
+        if groups.is_empty() {
+            out.push_str("\nNothing on the menu matches.\n");
+        }
+        for (heading, list) in groups {
+            let heading = if heading.trim().is_empty() {
+                "Other".to_owned()
+            } else {
+                escape_markdown(&heading)
+            };
+            out.push_str(&format!("\n## {heading}\n\n"));
+            for e in list {
+                let name = escape_markdown(&e.product.name);
+                let mut line = format!("- **{name}**");
+                if let Some(abv) = e.abv.filter(|a| *a > 0.0) {
+                    line.push_str(&format!(" {abv}%"));
+                }
+                if e.guest {
+                    line.push_str(" _(guest)_");
+                }
+                let sizes: Vec<String> = e
+                    .sizes
+                    .iter()
+                    .map(|s| {
+                        if e.sizes.len() == 1 && (s.name == "Standard" || s.name.is_empty()) {
+                            money(s.price)
+                        } else {
+                            format!("{} {}", escape_markdown(&s.name), money(s.price))
+                        }
+                    })
+                    .collect();
+                if !sizes.is_empty() {
+                    line.push_str(&format!(" — {}", sizes.join(" · ")));
+                }
+                let product = &e.product;
+                let asks: Vec<&str> = product
+                    .options
+                    .choices
+                    .iter()
+                    .filter(|g| g.required)
+                    .map(|g| g.title())
+                    .collect();
+                if !asks.is_empty() {
+                    line.push_str(&format!(" _(asks: {})_", escape_markdown(&asks.join("; "))));
+                }
+                let deals: Vec<&str> = product
+                    .options
+                    .linked
+                    .iter()
+                    .map(|l| l.name.trim())
+                    .filter(|n| !n.is_empty())
+                    .collect();
+                if !deals.is_empty() {
+                    line.push_str(&format!(" _({})_", escape_markdown(&deals.join("; "))));
+                }
+                if let Some(why) = &e.why_not {
+                    line.push_str(&format!(" ~~not available: {}~~", escape_markdown(why)));
+                }
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        out
+    }
+}
+
+/// Keeps a name from turning into Markdown: `*`, `_` and the like are shown as written.
+fn escape_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(
+            c,
+            '\\' | '*' | '_' | '`' | '[' | ']' | '#' | '<' | '>' | '|' | '~'
+        ) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// A category of the pub's own menu.
@@ -689,6 +822,21 @@ impl Menu {
             .map(|e| (e.product.id.to_string(), self.wrap(e)))
             .collect();
         page(items, after, first, 50, 300, close)
+    }
+    /// The whole menu (or the part `search` and `kinds` pick) as Markdown, for reading or saving: a heading per
+    /// kind, then each product with its strength, sizes and prices, guest ales first. Things that can't be ordered
+    /// here say why; products that ask a question (a side, a mixer) and meal deals say so. Free once the menu is
+    /// read. For "send me the menu", "a markdown menu of the pub I'm in".
+    async fn markdown(
+        &self,
+        #[graphql(desc = "Only these kinds.")] kinds: Option<Vec<Kind>>,
+        #[graphql(
+            desc = "Group by the pub's own categories (\"Soft drinks\", \"Pub classics\") rather than kinds.",
+            default = false
+        )]
+        by_category: bool,
+    ) -> String {
+        self.to_markdown(kinds.as_deref(), by_category)
     }
     /// The pub's own menu categories, as its app lists them ("0% cocktails", "Soft drinks", "Spritz cocktails"),
     /// with each one's kind and how many products are in it. Pass a name to `products(category:)`. Free.
