@@ -184,6 +184,7 @@ export type View =
 /** The parts of a `pay`, `cancelOrder` or `sendDuplicate` result the app shows. */
 export interface PayLike {
   success?: boolean;
+  confirmationToken?: string | null;
   preview?: string | null;
   paymentPage?: string | null;
   question?: string | null;

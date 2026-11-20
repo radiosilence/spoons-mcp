@@ -238,18 +238,22 @@ async function lastResultText(page) {
   check(true, "the options sheet adds fish and chips with mushy peas and a Guinness from the meal deal");
   await menu.app.fill(".search input", "");
 
-  // The app quotes and asks in the chat; it has no way to confirm.
+  // The app quotes, and pays on two taps of a button that shows the total: the first only arms it.
   await menu.app.click(".basket-bar");
   await settle(menu.app, ".basket-foot");
   await menu.app.click(".basket-foot .primary");
   await settle(menu.app, ".quote");
   const html = await menu.app.content();
-  check(!/confirm/i.test(await menu.app.locator(".quote button").allInnerTexts().then((t) => t.join(" "))), "the quote card offers no confirm");
-  await menu.app.click(".quote .primary");
-  await page.waitForSelector("text=Messages", { timeout: 10000 });
-  await page.locator("text=Messages").last().click();
-  const messages = await page.locator("pre").last().innerText();
-  check(/\[user\] Quote [0-9a-f]{12} is ready: .*Can you show me the payment preview\?/s.test(messages), "asking to pay posts a question into the chat");
+  const pay = menu.app.locator(".quote .primary.pay");
+  check(/^Pay £\d/.test((await pay.innerText()).trim()), "the quote card has a Pay button with the total");
+  await pay.click();
+  check(/Tap again to pay £[\d.]+ · table \d+/.test(await pay.innerText()), "one tap only arms it, naming the total and table");
+  check((await menu.app.locator(".quote .eyebrow").innerText()).startsWith("Quote"), "one tap pays nothing");
+  await pay.click();
+  await menu.app.waitForFunction(() => document.querySelector(".quote .eyebrow")?.textContent?.startsWith("Order"), null, {
+    timeout: 25000,
+  });
+  check(true, "the second tap pays, and the card follows the order");
   check(html.length > 0, "the app rendered");
 
   // Text-only hosts get the whole response as text.

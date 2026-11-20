@@ -2,9 +2,9 @@
 // change the user makes is told to the model.
 
 import { useEffect, useState } from "preact/hooks";
-import { gql, say, tellModel } from "./bridge";
+import { gql, openLink, say, tellModel } from "./bridge";
 import * as Q from "./queries";
-import type { Basket, Hints, OptionPick, Portion, Product, Quote, View } from "./types";
+import type { Basket, Hints, OptionPick, PayLike, Portion, Product, Quote, View } from "./types";
 
 export interface State {
   /** What the latest tool result asked to show; `null` shows nothing. */
@@ -148,7 +148,7 @@ export async function quote(): Promise<Quote | null> {
     }
     void tellModel(
       `In the Wetherspoon's app, the user asked the till for a quote: ${quote.quote.summary} (quote ${quote.quote.id}). ` +
-        `Nothing is paid; paying needs pay PREVIEW and the user's explicit yes in the chat.`,
+        `Nothing is paid yet: they can tap Pay in the app, or say yes in the chat.`,
       { quote: quote.quote },
     );
     go({ screen: "quote", quoteId: quote.quote.id });
@@ -161,12 +161,39 @@ export async function quote(): Promise<Quote | null> {
   }
 }
 
-/** Hands the decision to the conversation, as the user's own message. The app never pays. */
-export async function askToPay(q: Quote) {
-  const sent = await say(
-    `Quote ${q.id} is ready: ${q.summary} Can you show me the payment preview? I'll confirm in the chat.`,
-  );
-  toast(sent ? "Sent to the chat" : "Ask in the chat to pay", sent ? "ok" : "bad");
+/** Pays for a quote on the user's tap of the Pay button, which shows the total and table: that tap is their yes.
+ * PREVIEW then CONFIRM with its token, as the model would. A repeat of a recent order to the same table comes back
+ * as a question, which goes to the chat rather than being answered here. */
+export async function payNow(q: Quote): Promise<PayLike | null> {
+  set({ busy: true });
+  try {
+    const { pay: preview } = await gql<{ pay: PayLike }>(Q.PAY_PREVIEW, { id: q.id });
+    if (!preview.success || !preview.confirmationToken) {
+      toast(preview.error ?? "Couldn’t start paying.", "bad");
+      return preview;
+    }
+    const { pay } = await gql<{ pay: PayLike }>(Q.PAY_CONFIRM, { id: q.id, token: preview.confirmationToken });
+    if (pay.question) {
+      void say(`About quote ${q.id}: ${pay.question}`);
+    } else if (!pay.success) {
+      toast(pay.error ?? "The payment didn’t start.", "bad");
+    } else if (pay.paymentPage && (pay.status === "PENDING" || pay.status === "PREPARING") && !pay.card) {
+      void openLink(pay.paymentPage);
+    }
+    void tellModel(
+      `In the Wetherspoon's app, the user tapped Pay for quote ${q.id} (${q.summary}). ` +
+        (pay.question
+          ? `It was held as a repeat of a recent order: ${pay.question}`
+          : `Payment status: ${pay.status ?? "unknown"}. Follow it with order(quoteId:) if they ask; don't pay it again.`),
+      { pay },
+    );
+    return pay;
+  } catch (e) {
+    toast(String((e as Error).message ?? e), "bad");
+    return null;
+  } finally {
+    set({ busy: false });
+  }
 }
 
 /** Whether this app is in the viewport. Many may be in a long conversation; only the ones in view keep watching,
