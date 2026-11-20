@@ -1,0 +1,1 @@
+- **jiff 1.0.** The cargo group moves to jiff 1.0, whose `to_zoned` is now `to_zoned_datetime`.
