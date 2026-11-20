@@ -259,6 +259,47 @@ impl Product {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProductOptions {
     pub portion: Option<Portion>,
+    /// Groups of options a size can ask for, such as a spirit's mixer or a meal's side. Which ones a size needs is
+    /// on the size ([`PortionValue::choices`]); each takes one option.
+    #[serde(default)]
+    pub choices: Vec<ChoiceGroup>,
+    /// The deals the product is part of: a meal's "Includes a drink", or "Any 2 for £6.60".
+    #[serde(default)]
+    pub linked: Vec<Linked>,
+}
+
+/// A choice a product asks for, such as "Peas or mushy peas?". The options are products of their own, each with a
+/// price (usually nothing) on its default size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChoiceGroup {
+    #[serde(deserialize_with = "crate::de::id")]
+    pub id: u64,
+    /// Sometimes with a leading dot, as `.Mixer Choice`.
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub options: Vec<Product>,
+}
+
+impl ChoiceGroup {
+    /// The name as people would say it.
+    pub fn title(&self) -> &str {
+        self.name.trim_start_matches('.').trim()
+    }
+}
+
+/// A deal a product belongs to: a category of another menu the product is also listed in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Linked {
+    #[serde(default)]
+    pub menu_id: serde_json::Value,
+    #[serde(deserialize_with = "crate::de::id")]
+    pub category_id: u64,
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,11 +330,16 @@ pub struct PortionValue {
     pub choices: Vec<PortionChoice>,
 }
 
+/// A choice group a size asks for, echoed back to the till as it came.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortionChoice {
     #[serde(deserialize_with = "crate::de::id")]
     pub choice_id: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub portion_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_record_id: Option<u64>,
     #[serde(default)]
     pub required: bool,
 }
@@ -331,15 +377,30 @@ pub struct Table {
 
 /// A basket as the pub's till priced it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BasketValidation {
     pub id: String,
     pub total: Price,
     #[serde(default)]
     pub items: Vec<ValidatedLine>,
+    /// What deals took off, as a negative amount: a meal's included drink, a multi-buy.
+    #[serde(default)]
+    pub promotions_total: Option<Price>,
+    #[serde(default)]
+    pub promotions: Vec<Promotion>,
     /// Signed by the API over the basket and its total; preparing a payment needs it.
     pub token: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Promotion {
+    pub amount: Price,
+    #[serde(default)]
+    pub is_employee_discount: bool,
+}
+
+/// One line as the till priced it: `price` is the line's total, with what each choice added in `choice_lines`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatedLine {
     #[serde(deserialize_with = "crate::de::id")]

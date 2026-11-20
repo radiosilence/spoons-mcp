@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use spoons_api_client::{
     Ale, BasketLine, Card, CardError, CardOrder, Client, Error, PAYMENT_PAGE, PaymentStatus,
-    Payments, Table, Venue, VenueSummary, WaitTimes,
+    Payments, Product, Table, Venue, VenueSummary, WaitTimes,
 };
 use tokio::sync::OnceCell;
 use tokio::time::{Instant, sleep};
@@ -39,6 +39,7 @@ pub struct Service {
     /// One fetch of a sales area's menu at a time, so a query that asks for it twice reads it once.
     fetching: Mutex<HashMap<AreaKey, Arc<tokio::sync::Mutex<()>>>>,
     pub tokens: crate::tokens::TokenStore,
+    pub sessions: crate::session::Registry,
     /// Wait between polls of a payment; shortened in tests.
     poll: Duration,
     settle: Duration,
@@ -72,6 +73,122 @@ pub struct Wanted {
     pub product_id: u64,
     pub portion: Option<String>,
     pub quantity: u32,
+    /// Options as said, "chips" or an option's id, placed in whichever group they answer.
+    pub said: Vec<String>,
+    pub explicit: Vec<crate::choices::Explicit>,
+    /// A meal's included drink, ordered through the meal's "Includes a drink" deal.
+    pub include_drink: Option<Box<Wanted>>,
+    /// Ordered as listed in this deal category (a basket's included drink), and what to call the deal.
+    pub listing: Option<u64>,
+    pub deal: Option<String>,
+}
+
+impl Wanted {
+    pub fn plain(product_id: u64, portion: Option<String>, quantity: u32) -> Self {
+        Self {
+            product_id,
+            portion,
+            quantity,
+            said: Vec::new(),
+            explicit: Vec::new(),
+            include_drink: None,
+            listing: None,
+            deal: None,
+        }
+    }
+
+    /// Options already resolved to ids, as a basket or an earlier quote holds them.
+    pub fn with_picks(mut self, picks: &[(u64, u64)]) -> Self {
+        self.explicit = picks
+            .iter()
+            .map(|(group, option)| crate::choices::Explicit {
+                group: Some(group.to_string()),
+                options: vec![option.to_string()],
+            })
+            .collect();
+        self
+    }
+}
+
+/// A size named as the menu labels it or by its name alone ("250ml glass"), as the label the till matches.
+fn label_of<'a>(product: &'a Product, wanted: Option<&'a str>) -> Option<&'a str> {
+    let wanted = wanted?;
+    Some(
+        product
+            .options
+            .portion
+            .iter()
+            .flat_map(|p| &p.options)
+            .find(|o| {
+                o.label.eq_ignore_ascii_case(wanted)
+                    || o.label
+                        .split(" (")
+                        .next()
+                        .is_some_and(|name| name.trim().eq_ignore_ascii_case(wanted))
+            })
+            .map_or(wanted, |o| o.label.as_str()),
+    )
+}
+
+/// A meal's included drink: the drink as its "Includes a drink" deal lists it, as many as there are meals.
+pub fn included_drink(
+    catalogue: &Catalogue,
+    meal: &Product,
+    drink: &Wanted,
+    quantity: u32,
+) -> Result<(BasketLine, Line), String> {
+    let deal = catalogue
+        .included_drinks(meal)
+        .ok_or_else(|| format!("{} doesn't come with a drink", meal.name))?;
+    let product = deal.products.iter().find(|p| p.id == drink.product_id).ok_or_else(|| {
+        format!(
+            "product {} isn't one of the drinks included with {}; `Product.includedDrinks` lists them",
+            drink.product_id, meal.name
+        )
+    })?;
+    let (line, mut record) = line_for(
+        deal.category_id,
+        product,
+        drink,
+        quantity,
+        Some(format!("included with {}", meal.name)),
+    )?;
+    record.listing = Some(deal.category_id);
+    Ok((line, record))
+}
+
+/// A line for `product` listed under `category`, with the options asked for, and its menu price for one.
+pub fn line_for(
+    category: u64,
+    product: &Product,
+    wanted: &Wanted,
+    quantity: u32,
+    deal: Option<String>,
+) -> Result<(BasketLine, Line), String> {
+    let portion = label_of(product, wanted.portion.as_deref());
+    let picks = crate::choices::resolve(product, portion, &wanted.said, &wanted.explicit)?;
+    let line = BasketLine::new(category, product, portion, quantity, &picks).map_err(fail)?;
+    let size = spoons_api_client::find_portion(product, Some(&line.portion)).map_err(fail)?;
+    let extras: f64 = picks
+        .iter()
+        .filter_map(|(group, option)| {
+            let group = product.options.choices.iter().find(|g| g.id == *group)?;
+            spoons_api_client::option_price(group.options.iter().find(|o| o.id == *option)?)
+        })
+        .sum();
+    let record = Line {
+        product_id: product.id,
+        name: product.name.clone(),
+        portion: line.portion.clone(),
+        quantity,
+        price: None,
+        menu_price: Some(((size.value.price.value + extras) * 100.0).round() / 100.0),
+        choices: line.choices.clone(),
+        deal,
+        picks,
+        listing: None,
+    };
+    Ok((line, record))
 }
 
 /// What `pay` did, for the caller to report.
@@ -133,6 +250,7 @@ impl Service {
             menus: Mutex::default(),
             fetching: Mutex::default(),
             tokens: crate::tokens::TokenStore::default(),
+            sessions: crate::session::Registry::default(),
             poll: POLL,
             settle: SETTLE,
         }
@@ -327,42 +445,57 @@ impl Service {
         let mut basket = Vec::new();
         let mut lines = Vec::new();
         for item in items {
-            let entry = catalogue
-                .get(item.product_id)
-                .ok_or_else(|| {
-                    format!(
-                        "product {} isn't on the menu for table {table}",
-                        item.product_id
+            let (category, product, deal) = match item.listing {
+                Some(listing) => {
+                    let deal = catalogue
+                        .deals
+                        .iter()
+                        .find(|d| d.category_id == listing)
+                        .ok_or_else(|| "that deal isn't on the menu for this table".to_owned())
+                        .map_err(forget)?;
+                    let product = deal
+                        .products
+                        .iter()
+                        .find(|p| p.id == item.product_id)
+                        .ok_or_else(|| {
+                            format!("product {} isn't in {}", item.product_id, deal.name)
+                        })
+                        .map_err(forget)?;
+                    (
+                        listing,
+                        product,
+                        item.deal.clone().or_else(|| Some(deal.name.clone())),
                     )
-                })
-                .map_err(forget)?;
-            // A size can be named as the menu labels it or by its name alone ("250ml glass"); the till matches
-            // labels, so a name becomes its label here.
-            let portion = item.portion.as_deref().map(|wanted| {
-                entry
-                    .sizes
-                    .iter()
-                    .find(|s| {
-                        s.label.eq_ignore_ascii_case(wanted) || s.name.eq_ignore_ascii_case(wanted)
-                    })
-                    .map_or(wanted, |s| s.label.as_str())
-            });
-            let line = BasketLine::new(entry.category_id, &entry.product, portion, item.quantity)
-                .map_err(fail)?;
-            let menu_price = entry
-                .sizes
-                .iter()
-                .find(|s| s.label == line.portion)
-                .map(|s| s.price);
-            lines.push(Line {
-                product_id: entry.product.id,
-                name: entry.product.name.clone(),
-                portion: line.portion.clone(),
-                quantity: item.quantity,
-                price: None,
-                menu_price,
-            });
+                }
+                None => {
+                    let entry = catalogue
+                        .get(item.product_id)
+                        .ok_or_else(|| {
+                            format!(
+                                "product {} isn't on the menu for table {table}",
+                                item.product_id
+                            )
+                        })
+                        .map_err(forget)?;
+                    (entry.category_id, &entry.product, None)
+                }
+            };
+            let (line, mut record) = line_for(category, product, item, item.quantity, deal)?;
+            if item.listing.is_some() {
+                record.listing = Some(category);
+            }
             basket.push(line);
+            lines.push(record);
+            if let Some(drink) = &item.include_drink {
+                let (line, record) = included_drink(&catalogue, product, drink, item.quantity)?;
+                basket.push(line);
+                lines.push(record);
+            }
+        }
+        if lines.len() > MAX_LINES {
+            return Err(format!(
+                "a quote takes at most {MAX_LINES} lines, included drinks counting"
+            ));
         }
         let validation = self
             .client
@@ -387,6 +520,11 @@ impl Service {
             table,
             lines,
             total: validation.total.value,
+            savings: validation
+                .promotions_total
+                .as_ref()
+                .map(|p| -p.value)
+                .filter(|saved| *saved > 0.004),
             currency: validation
                 .total
                 .currency

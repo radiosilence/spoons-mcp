@@ -6,15 +6,18 @@ use clap::{Parser, Subcommand, ValueEnum};
 use spoons_api_client::Client;
 
 mod catalogue;
+mod choices;
 mod dump;
 mod graphql;
 mod mcp;
 mod orders;
 mod prices;
+mod search;
 mod service;
 mod session;
 mod tiers;
 mod tokens;
+mod ui;
 
 #[derive(Parser)]
 #[command(version, about)]

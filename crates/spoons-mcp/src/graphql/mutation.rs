@@ -11,8 +11,8 @@ use async_graphql::{Context, ID, Object, Result};
 
 use super::Caller;
 use super::types::{
-    BasketResult, ConfirmAction, Money, Order, OrderActionResult, PayResult, Quote, QuoteItemInput,
-    QuoteResult, order_status, service,
+    BasketResult, ConfirmAction, IncludedDrinkInput, Money, OptionPickInput, Order,
+    OrderActionResult, PayResult, Quote, QuoteItemInput, QuoteResult, order_status, service,
 };
 use crate::catalogue::Catalogue;
 use crate::orders::Payment;
@@ -60,60 +60,92 @@ fn basket_result(session: &Session, outcome: Result<(), String>) -> BasketResult
     }
 }
 
-/// Puts a product into an item, priced from `catalogue`.
-fn item(
-    catalogue: &Catalogue,
-    product_id: u64,
-    portion: Option<&str>,
-    quantity: u32,
-) -> Result<Item, String> {
+fn item_from(
+    line: crate::orders::Line,
+    kind: crate::catalogue::Kind,
+    colour: Option<crate::catalogue::Colour>,
+) -> Item {
+    Item {
+        product_id: line.product_id,
+        name: line.name,
+        portion: line.portion,
+        quantity: line.quantity,
+        unit_price: line.menu_price,
+        kind,
+        colour,
+        note: None,
+        picks: line.picks,
+        choices: line.choices,
+        listing: line.listing,
+        with: None,
+    }
+}
+
+/// Puts a product into an item with its options, priced from `catalogue`. A required option left out is refused
+/// with the choices listed, so they can be asked for.
+fn item(catalogue: &Catalogue, wanted: &Wanted) -> Result<Item, String> {
     let entry = catalogue
-        .get(product_id)
-        .ok_or_else(|| format!("product {product_id} isn't on this menu"))?;
+        .get(wanted.product_id)
+        .ok_or_else(|| format!("product {} isn't on this menu", wanted.product_id))?;
     if let Some(why) = &entry.why_not {
         return Err(why.clone());
     }
-    let size = match portion {
-        Some(wanted) => entry
-            .sizes
-            .iter()
-            .find(|s| s.label.eq_ignore_ascii_case(wanted) || s.name.eq_ignore_ascii_case(wanted))
-            .ok_or_else(|| {
-                format!(
-                    "{} doesn't come as {wanted}; it comes as {}",
-                    entry.product.name,
-                    entry
-                        .sizes
-                        .iter()
-                        .map(|s| s.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            })?,
-        None => entry
-            .default_size()
-            .ok_or_else(|| format!("{} has no sizes to order", entry.product.name))?,
-    };
-    Ok(Item {
-        product_id,
-        name: entry.product.name.clone(),
-        portion: size.label.clone(),
-        quantity,
-        unit_price: Some(size.price),
-        kind: entry.kind,
-        note: None,
-    })
+    let (_, line) = crate::service::line_for(
+        entry.category_id,
+        &entry.product,
+        wanted,
+        wanted.quantity,
+        None,
+    )?;
+    Ok(item_from(line, entry.kind, entry.colour.clone()))
 }
 
-/// Re-prices every line against a sales area's menu, noting lines that aren't on it.
+/// A meal's included drink as a basket item of its own, going with the meal's line.
+fn drink_item(
+    catalogue: &Catalogue,
+    meal_product: u64,
+    drink: &Wanted,
+    quantity: u32,
+    with: String,
+) -> Result<Item, String> {
+    let meal = catalogue
+        .get(meal_product)
+        .ok_or_else(|| format!("product {meal_product} isn't on this menu"))?;
+    let (_, line) = crate::service::included_drink(catalogue, &meal.product, drink, quantity)?;
+    let (kind, colour) = catalogue
+        .get(line.product_id)
+        .map_or((crate::catalogue::Kind::Other, None), |e| {
+            (e.kind, e.colour.clone())
+        });
+    let mut item = item_from(line, kind, colour);
+    item.with = Some(with);
+    Ok(item)
+}
+
+/// Re-prices every line against a sales area's menu, options and all, noting lines that aren't on it.
 fn reprice(basket: &mut Basket, catalogue: &Catalogue, table: Option<u32>) {
+    let meals: Vec<(String, u64)> = basket
+        .items
+        .iter()
+        .map(|i| (i.id(), i.product_id))
+        .collect();
     for line in &mut basket.items {
-        match item(
-            catalogue,
-            line.product_id,
-            Some(&line.portion),
-            line.quantity,
-        ) {
+        let wanted = Wanted::plain(line.product_id, Some(line.portion.clone()), line.quantity)
+            .with_picks(&line.picks);
+        let fresh = match &line.with {
+            Some(meal) => match meals.iter().find(|(id, _)| id == meal) {
+                Some((_, meal_product)) => drink_item(
+                    catalogue,
+                    *meal_product,
+                    &wanted,
+                    line.quantity,
+                    meal.clone(),
+                ),
+                None => Err("its meal has gone".to_owned()),
+            },
+            None => item(catalogue, &wanted),
+        };
+        match fresh {
             Ok(fresh) => {
                 line.unit_price = fresh.unit_price;
                 line.note = None;
@@ -127,6 +159,37 @@ fn reprice(basket: &mut Basket, catalogue: &Catalogue, table: Option<u32>) {
             }
         }
     }
+}
+
+/// What the user picked for a product, as the service takes it.
+fn wanted_from(
+    product_id: u64,
+    portion: Option<String>,
+    quantity: u32,
+    choices: Option<Vec<String>>,
+    options: Option<Vec<OptionPickInput>>,
+) -> Wanted {
+    let mut wanted = Wanted::plain(product_id, portion, quantity);
+    wanted.said = choices.unwrap_or_default();
+    wanted.explicit = options
+        .unwrap_or_default()
+        .into_iter()
+        .map(|o| crate::choices::Explicit {
+            group: o.group,
+            options: o.options,
+        })
+        .collect();
+    wanted
+}
+
+fn drink_wanted(drink: IncludedDrinkInput) -> Result<Wanted, String> {
+    Ok(wanted_from(
+        parse_id(&drink.product_id)?,
+        drink.portion,
+        1,
+        drink.choices,
+        drink.options,
+    ))
 }
 
 /// The pub a change is for: the one named, which must match the basket's, or the basket's.
@@ -174,6 +237,7 @@ impl MutationRoot {
     /// Adds a product to this conversation's basket, priced from the basket's table's menu. Adding the same size
     /// again raises its quantity. The first add needs `pub`; `table` sets the table too, but only pass one the user
     /// gave. Free once the menu is read (see `Pub.menu` for that cost).
+    #[allow(clippy::too_many_arguments)]
     async fn basket_add(
         &self,
         ctx: &Context<'_>,
@@ -189,12 +253,23 @@ impl MutationRoot {
         )]
         portion: Option<String>,
         #[graphql(default = 1)] quantity: i32,
+        #[graphql(
+            desc = "Options as the user said them (\"chips\", \"mushy peas\", \"lemonade\", \"neat\") or by id: each lands in the group it answers."
+        )]
+        choices: Option<Vec<String>>,
+        #[graphql(desc = "Options by group, for when a word could answer two groups.")]
+        options: Option<Vec<OptionPickInput>>,
+        #[graphql(
+            desc = "For a meal that includes a drink (`deals`), the drink, from `includedDrinks`."
+        )]
+        include_drink: Option<IncludedDrinkInput>,
     ) -> BasketResult {
         let service = service(ctx);
         let session = session(ctx);
         let outcome = async {
             let product_id = parse_id(&product_id)?;
             let quantity = parse_quantity(quantity)?;
+            let drink = include_drink.map(drink_wanted).transpose()?;
             let table = table.map(parse_table).transpose()?;
             let current = session.basket();
             let pub_ref = which_pub(service, &current, pub_).await?;
@@ -205,7 +280,13 @@ impl MutationRoot {
             };
             let table = table.or(keep_table);
             let (area, catalogue) = catalogue_for(service, &pub_ref, table).await?;
-            let new = item(&catalogue, product_id, portion.as_deref(), quantity)?;
+            let new = item(
+                &catalogue,
+                &wanted_from(product_id, portion, quantity, choices, options),
+            )?;
+            let drink = drink
+                .map(|d| drink_item(&catalogue, product_id, &d, quantity, new.id()))
+                .transpose()?;
             session.change(|basket| {
                 if !same_pub(basket, &pub_ref) {
                     *basket = Basket {
@@ -219,21 +300,25 @@ impl MutationRoot {
                     basket.sales_area = Some(area);
                     reprice(basket, &catalogue, table);
                 }
-                let lines = basket.items.len();
-                match basket.items.iter_mut().find(|i| i.id() == new.id()) {
-                    Some(existing) => {
-                        let total = existing.quantity + new.quantity;
-                        if total > MAX_QUANTITY {
-                            return Err(format!("at most {MAX_QUANTITY} of one thing in an order"));
+                for new in std::iter::once(new).chain(drink) {
+                    let lines = basket.items.len();
+                    match basket.items.iter_mut().find(|i| i.id() == new.id()) {
+                        Some(existing) => {
+                            let total = existing.quantity + new.quantity;
+                            if total > MAX_QUANTITY {
+                                return Err(format!(
+                                    "at most {MAX_QUANTITY} of one thing in an order"
+                                ));
+                            }
+                            existing.quantity = total;
                         }
-                        existing.quantity = total;
+                        None if lines >= MAX_LINES => {
+                            return Err(format!(
+                                "an order takes at most {MAX_LINES} different lines"
+                            ));
+                        }
+                        None => basket.items.push(new),
                     }
-                    None if lines >= MAX_LINES => {
-                        return Err(format!(
-                            "an order takes at most {MAX_LINES} different lines"
-                        ));
-                    }
-                    None => basket.items.push(new),
                 }
                 Ok(())
             })
@@ -293,7 +378,7 @@ impl MutationRoot {
                     let product = parse_id(product)?;
                     let pub_ref = which_pub(service, &current, None).await?;
                     let (_, catalogue) = catalogue_for(service, &pub_ref, current.table).await?;
-                    let found = item(&catalogue, product, portion.as_deref(), 1)?;
+                    let found = item(&catalogue, &Wanted::plain(product, portion.clone(), 1))?;
                     if !current.items.iter().any(|i| i.id() == found.id()) && quantity > 0 {
                         let mut found = found;
                         found.quantity = quantity as u32;
@@ -355,21 +440,25 @@ impl MutationRoot {
                     pub_ref: Some(pub_ref.clone()),
                     table: Some(order.table),
                     sales_area: Some(area),
-                    items: order
-                        .lines
-                        .iter()
-                        .map(|l| Item {
-                            product_id: l.product_id,
-                            name: l.name.clone(),
-                            portion: l.portion.clone(),
-                            quantity: l.quantity,
-                            unit_price: l.menu_price,
-                            kind: catalogue
-                                .get(l.product_id)
-                                .map_or(crate::catalogue::Kind::Other, |e| e.kind),
-                            note: None,
-                        })
-                        .collect(),
+                    // An included drink comes right after its meal in a quote, so it goes with the line before.
+                    items: {
+                        let mut items: Vec<Item> = Vec::new();
+                        for l in &order.lines {
+                            let mut it = item_from(
+                                l.clone(),
+                                catalogue
+                                    .get(l.product_id)
+                                    .map_or(crate::catalogue::Kind::Other, |e| e.kind),
+                                catalogue.get(l.product_id).and_then(|e| e.colour.clone()),
+                            );
+                            if l.listing.is_some() {
+                                it.with =
+                                    items.iter().rev().find(|i| i.with.is_none()).map(Item::id);
+                            }
+                            items.push(it);
+                        }
+                        items
+                    },
                     version: basket.version,
                 };
                 reprice(basket, &catalogue, Some(order.table));
@@ -450,20 +539,28 @@ impl MutationRoot {
                 Some(items) => items
                     .iter()
                     .map(|i| {
-                        Ok(Wanted {
-                            product_id: parse_id(&i.product_id)?,
-                            portion: i.portion.clone(),
-                            quantity: parse_quantity(i.quantity)?,
-                        })
+                        let mut wanted = wanted_from(
+                            parse_id(&i.product_id)?,
+                            i.portion.clone(),
+                            parse_quantity(i.quantity)?,
+                            i.choices.clone(),
+                            i.options.clone(),
+                        );
+                        wanted.include_drink = i.include_drink.clone().map(drink_wanted).transpose()?.map(Box::new);
+                        Ok(wanted)
                     })
                     .collect::<Result<_, String>>()?,
                 None if same_pub(&basket, &pub_ref) && !basket.items.is_empty() => basket
                     .items
                     .iter()
-                    .map(|i| Wanted {
-                        product_id: i.product_id,
-                        portion: Some(i.portion.clone()),
-                        quantity: i.quantity,
+                    .map(|i| {
+                        let mut wanted =
+                            Wanted::plain(i.product_id, Some(i.portion.clone()), i.quantity).with_picks(&i.picks);
+                        wanted.listing = i.listing;
+                        wanted.deal = i.with.as_ref().and_then(|meal| {
+                            basket.items.iter().find(|m| m.id() == *meal).map(|m| format!("included with {}", m.name))
+                        });
+                        wanted
                     })
                     .collect(),
                 None => return Err("the basket is empty: add something, or pass `items`".to_owned()),

@@ -37,9 +37,19 @@ struct Till;
 impl Respond for Till {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         let body: Value = serde_json::from_slice(&request.body).unwrap();
-        let items: Vec<Value> = body["items"]
-            .as_array()
-            .unwrap()
+        let lines = body["items"].as_array().unwrap();
+        // As the real till does, a size whose required choices weren't sent is "unavailable".
+        for line in lines {
+            for asked in line["portion"]["choices"].as_array().into_iter().flatten() {
+                let group = asked["choiceId"].to_string();
+                if asked["required"] == true && line["choices"].get(&group).is_none() {
+                    return ResponseTemplate::new(400).set_body_json(json!({ "success": false,
+                        "message": format!("{} is currently unavailable, please make another selection. (Z216)",
+                            line["product"]["name"].as_str().unwrap()) }));
+                }
+            }
+        }
+        let items: Vec<Value> = lines
             .iter()
             .map(|line| {
                 let quantity = line["quantity"].as_u64().unwrap();
@@ -47,12 +57,23 @@ impl Respond for Till {
                         "price": { "value": 3.70 * quantity as f64 } })
             })
             .collect();
-        let total: f64 = items
+        let mut total: f64 = items
             .iter()
             .map(|i| i["price"]["value"].as_f64().unwrap())
             .sum();
+        // A drink ordered through a meal's "Includes a drink" (category 400271 here) takes £1.96 off, as the till did
+        // for a pudding and a Carling.
+        let deals = lines
+            .iter()
+            .filter(|l| l["product"]["category"]["id"] == 400271)
+            .map(|l| l["quantity"].as_f64().unwrap())
+            .sum::<f64>();
+        let saved = 1.96 * deals;
+        total -= saved;
         ResponseTemplate::new(200).set_body_json(json!({ "data": {
             "id": "basket-1", "total": { "value": (total * 100.0).round() / 100.0, "currency": "GBP" },
+            "promotionsTotal": { "value": -saved, "currency": "GBP" },
+            "promotions": if deals > 0.0 { json!([{ "id": 1, "amount": { "value": -saved }, "isEmployeeDiscount": false }]) } else { json!([]) },
             "items": items, "token": "signed-by-the-api",
         } }))
     }
@@ -325,8 +346,9 @@ async fn searches_filters_and_explains_what_cannot_be_ordered() {
         .iter()
         .find(|p| p["name"].as_str().unwrap().starts_with("Gordons"))
         .unwrap();
-    assert_eq!(pink["orderable"], false);
-    assert!(pink["whyNot"].as_str().unwrap().contains("choice"));
+    // A mixer to choose no longer stops it: the menu says what to ask.
+    assert_eq!(pink["orderable"], true);
+    assert_eq!(pink["whyNot"], Value::Null);
     let after = menu["page"]["pageInfo"]["endCursor"].as_str().unwrap();
     let next = h
         .run(
@@ -772,6 +794,75 @@ async fn one_pub_failing_doesnt_fail_the_list() {
     );
 }
 
+/// A tool result's text, parsed.
+fn answer(result: &rmcp::model::CallToolResult) -> Value {
+    let block = serde_json::to_value(&result.content[0]).unwrap();
+    serde_json::from_str(block["text"].as_str().unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn a_tool_result_carries_the_screen_for_the_app() {
+    let h = harness().await;
+    let request: crate::mcp::GraphqlRequest = serde_json::from_value(json!({
+        "query": "query($t: Int) { pub(ref: 254) { menu(table: $t, search: \"ale\") { totalCount } } }",
+        "variables": "{\"t\": 4}",
+        "ui": { "view": "FULL", "focus": "CASK_ALE" },
+    }))
+    .unwrap();
+    let result = h.spoons.run_tool(caller(), &request).await;
+    let structured = result.structured_content.clone().unwrap();
+    assert_eq!(
+        structured["view"],
+        json!({ "screen": "menu", "pub": 254, "table": 4, "search": "ale" })
+    );
+    assert_eq!(structured["ui"]["focus"], "CASK_ALE");
+    // The response itself is the text, for the model and hosts without the app; it isn't sent twice.
+    assert!(structured.get("data").is_none());
+    assert!(
+        answer(&result)["data"]["pub"]["menu"]["totalCount"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+}
+
+#[tokio::test]
+async fn the_app_reaches_its_conversations_basket_and_no_one_elses() {
+    let h = harness().await;
+    let call = |query: &str, session: Option<&str>| -> crate::mcp::GraphqlRequest {
+        serde_json::from_value(
+            json!({ "query": query, "ui": { "view": "NONE", "session": session } }),
+        )
+        .unwrap()
+    };
+    let add = format!("mutation {{ basketAdd(pub: 254, productId: \"{ABBOT}\") {{ success }} }}");
+    let model = h.spoons.run_tool(caller(), &call(&add, None)).await;
+    let session = model.structured_content.unwrap()["session"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // The host gave the app a session of its own; naming the conversation's reaches its basket.
+    let app = h.spoons.for_new_session();
+    let seen = app
+        .run_tool(caller(), &call("{ basket { count } }", Some(&session)))
+        .await;
+    assert_eq!(
+        seen.structured_content.as_ref().unwrap()["view"],
+        Value::Null,
+        "the app's own calls draw nothing"
+    );
+    assert_eq!(answer(&seen)["data"]["basket"]["count"], 1);
+    // Someone else can't, even knowing the id.
+    let stranger = Caller {
+        email: Some("someone@else.com".into()),
+        card: Ok(None),
+    };
+    let theirs = app
+        .run_tool(stranger, &call("{ basket { count } }", Some(&session)))
+        .await;
+    assert_eq!(answer(&theirs)["data"]["basket"]["count"], 0);
+}
+
 #[tokio::test]
 async fn quotes_items_by_a_sizes_name_as_well_as_its_label() {
     let h = harness().await;
@@ -818,4 +909,484 @@ async fn an_api_thats_down_is_an_error_not_a_list_of_empty_pubs() {
         .await
         .unwrap();
     assert!(!response.errors.is_empty());
+}
+
+// Regressions from a real session at The Brockley Barge, ordering by voice: what was said, and what it should
+// have found.
+
+async fn names(h: &Harness, search: &str) -> (Vec<String>, bool) {
+    let data = h
+        .run(
+            "query($s: String) { pub(ref: 254) { menu { products(search: $s, first: 10) { closeMatches nodes { name } } } } }",
+            json!({ "s": search }),
+        )
+        .await;
+    let products = &data["pub"]["menu"]["products"];
+    (
+        products["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["name"].as_str().unwrap().to_owned())
+            .collect(),
+        products["closeMatches"].as_bool().unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn finds_a_misheard_pub() {
+    let h = harness().await;
+    for said in [
+        "Broccoli Barge",
+        "the brockley barge spoons",
+        "barge",
+        "brockly",
+    ] {
+        let data = h
+            .run(
+                "query($q: String) { pubs(query: $q) { closeMatches nodes { ref name } } }",
+                json!({ "q": said }),
+            )
+            .await;
+        assert_eq!(data["pubs"]["nodes"][0]["ref"], 1006, "{said}: {data}");
+    }
+    // A town or a postcode still works, squashed or not.
+    let data = h
+        .run("{ pubs(query: \"se42rr\") { nodes { ref } } }", json!({}))
+        .await;
+    assert_eq!(data["pubs"]["nodes"][0]["ref"], 1006);
+}
+
+#[tokio::test]
+async fn sees_through_brand_styling() {
+    let h = harness().await;
+    let (found, close) = names(&h, "sumo").await;
+    assert_eq!(
+        found.first().map(String::as_str),
+        Some("Mad Squirrel $umo"),
+        "{found:?}"
+    );
+    assert!(!close);
+}
+
+#[tokio::test]
+async fn knows_what_a_mocktail_is() {
+    let h = harness().await;
+    for said in [
+        "mocktail",
+        "a virgin cocktail",
+        "mocktails please",
+        "something alcohol free and fruity",
+    ] {
+        let (found, _) = names(&h, said).await;
+        let top: Vec<&str> = found.iter().take(2).map(String::as_str).collect();
+        assert!(
+            top.iter().all(|n| [
+                "Raspberry Refresher",
+                "Passion Fruit Cooler",
+                "Rasp Refresher"
+            ]
+            .contains(n)),
+            "{said}: {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_cocktail_is_a_drink_before_it_is_crisps() {
+    let h = harness().await;
+    let (found, _) = names(&h, "cocktail").await;
+    let crisps = found.iter().position(|n| n.contains("crisps"));
+    assert!(crisps.is_none_or(|i| i >= 5), "{found:?}");
+    assert!(!found[0].contains("crisps"));
+}
+
+#[tokio::test]
+async fn forgives_typos_and_filler() {
+    let h = harness().await;
+    for said in ["abot", "4 pints of abbot please", "Abbot Ale"] {
+        let (found, _) = names(&h, said).await;
+        assert_eq!(
+            found.first().map(String::as_str),
+            Some("Greene King Abbot Ale"),
+            "{said}: {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn offers_the_nearest_rather_than_nothing() {
+    let h = harness().await;
+    let (found, close) = names(&h, "sunrise cocktail").await;
+    assert!(close, "nothing here is a sunrise");
+    assert!(!found.is_empty());
+}
+
+#[tokio::test]
+async fn lists_and_filters_by_the_pubs_own_categories() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "{ pub(ref: 254) { menu { categories { name kind count } \
+               zero: products(category: \"0% cocktails\") { nodes { name } } \
+               mock: products(category: \"mocktails\") { totalCount } \
+               soft: products(category: \"soft drinks\") { totalCount } } } }",
+            json!({}),
+        )
+        .await;
+    let menu = &data["pub"]["menu"];
+    let categories = menu["categories"].as_array().unwrap();
+    let zero = categories
+        .iter()
+        .find(|c| c["name"] == "0% cocktails")
+        .unwrap();
+    assert_eq!(zero["kind"], "ALCOHOL_FREE");
+    let names: Vec<&str> = menu["zero"]["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), zero["count"].as_u64().unwrap() as usize);
+    assert!(
+        names.contains(&"Raspberry Refresher") && names.contains(&"Passion Fruit Cooler"),
+        "{names:?}"
+    );
+    assert_eq!(menu["mock"]["totalCount"], zero["count"]);
+    assert!(menu["soft"]["totalCount"].as_u64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn pages_through_the_whole_menu() {
+    let h = harness().await;
+    let mut after: Option<String> = None;
+    let mut seen = std::collections::HashSet::new();
+    let total = loop {
+        let data = h
+            .run(
+                "query($a: String) { pub(ref: 254) { menu { products(first: 40, after: $a) { totalCount \
+                   nodes { id } pageInfo { hasNextPage endCursor } } } } }",
+                json!({ "a": after }),
+            )
+            .await;
+        let page = &data["pub"]["menu"]["products"];
+        for node in page["nodes"].as_array().unwrap() {
+            assert!(
+                seen.insert(node["id"].as_str().unwrap().to_owned()),
+                "a product came twice"
+            );
+        }
+        if page["pageInfo"]["hasNextPage"] != true {
+            break page["totalCount"].as_u64().unwrap();
+        }
+        after = page["pageInfo"]["endCursor"].as_str().map(str::to_owned);
+    };
+    assert_eq!(seen.len() as u64, total);
+    assert!(total > 50, "every product, not the old first fifty");
+}
+
+#[tokio::test]
+async fn an_alcohol_free_lager_is_both() {
+    let h = harness().await;
+    let (found, close) = names(&h, "alcohol free lager").await;
+    assert!(!close, "{found:?}");
+    assert!(
+        found
+            .iter()
+            .take(3)
+            .all(|n| n.to_lowercase().contains("alcohol free") || n.contains("Low alcohol")),
+        "{found:?}"
+    );
+    let (found, _) = names(&h, "a pint of stella").await;
+    assert!(found.iter().all(|n| n.contains("Stella")), "{found:?}");
+}
+
+// Products that ask a question before they can be ordered: a spirit's mixer, a meal's side, a meal's drink.
+
+const FISH: &str = "10000162183";
+const WRAP: &str = "10000159693";
+
+async fn product_id(h: &Harness, search: &str) -> String {
+    let data = h
+        .run(
+            "query($s: String) { pub(ref: 254) { menu { products(search: $s, first: 1) { nodes { id } } } } }",
+            json!({ "s": search }),
+        )
+        .await;
+    data["pub"]["menu"]["products"]["nodes"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn shows_the_questions_a_product_asks() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "query($p: ID!) { pub(ref: 254) { menu { product(id: $p) { orderable needsChoices \
+               optionGroups { id name required minPicks maxPicks options { id label price { amount } available } } \
+               deals { name kind buy } } } } }",
+            json!({ "p": FISH }),
+        )
+        .await;
+    let product = &data["pub"]["menu"]["product"];
+    assert_eq!(product["orderable"], true);
+    assert_eq!(product["needsChoices"], true);
+    let group = &product["optionGroups"][0];
+    assert_eq!(group["name"], "Peas, mushy peas or beans?");
+    assert_eq!(
+        (
+            group["required"].clone(),
+            group["minPicks"].clone(),
+            group["maxPicks"].clone()
+        ),
+        (json!(true), json!(1), json!(1))
+    );
+    let labels: Vec<&str> = group["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        labels,
+        ["Plain", "Baked Beans", "Garden Peas", "Mushy Peas"]
+    );
+    assert_eq!(
+        product["deals"],
+        json!([{ "name": "Includes a drink", "kind": "INCLUDES_DRINK", "buy": null }])
+    );
+}
+
+#[tokio::test]
+async fn asks_rather_than_guesses_a_missing_choice() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "mutation($p: ID!) { basketAdd(pub: 254, table: 4, productId: $p) { success error basket { count } } }",
+            json!({ "p": FISH }),
+        )
+        .await;
+    assert_eq!(data["basketAdd"]["success"], false);
+    let error = data["basketAdd"]["error"].as_str().unwrap();
+    assert!(
+        error.contains("needs a choice for “Peas, mushy peas or beans?”: Plain, Baked Beans, Garden Peas, Mushy Peas"),
+        "{error}"
+    );
+    let wrong = h
+        .run(
+            "mutation($p: ID!) { quote(pub: 254, table: 4, items: [{productId: $p, choices: [\"coleslaw\"]}]) { success error } }",
+            json!({ "p": FISH }),
+        )
+        .await;
+    assert!(
+        wrong["quote"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("“coleslaw” isn't one of"),
+        "{wrong}"
+    );
+    assert_eq!(
+        h.hits("POST", "/basket/validate").await,
+        0,
+        "nothing reached the till unasked"
+    );
+}
+
+#[tokio::test]
+async fn orders_fish_and_chips_with_mushy_peas() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "mutation($p: ID!) { basketAdd(pub: 254, table: 4, productId: $p, choices: [\"mushy peas\"]) \
+               { success error basket { lines { id options } summary } } \
+               quote { success error quote { summary lines { description options } } } }",
+            json!({ "p": FISH }),
+        )
+        .await;
+    assert_eq!(data["basketAdd"]["success"], true, "{data}");
+    assert_eq!(
+        data["basketAdd"]["basket"]["lines"][0]["options"],
+        json!(["Mushy Peas"])
+    );
+    assert_eq!(data["quote"]["success"], true, "{data}");
+    assert_eq!(
+        data["quote"]["quote"]["lines"][0]["description"],
+        "Small freshly battered fish and chips (Mushy Peas)"
+    );
+    // The till got the choice as the app sends it.
+    let sent = h.server.received_requests().await.unwrap();
+    let body: Value = serde_json::from_slice(
+        &sent
+            .iter()
+            .rev()
+            .find(|r| r.url.path().ends_with("/validate"))
+            .unwrap()
+            .body,
+    )
+    .unwrap();
+    let choice = &body["items"][0]["choices"]["10000152029"];
+    assert_eq!(choice["name"], "Mushy Peas");
+    assert_eq!(choice["checkout"]["choiceId"], 10000152029_u64);
+}
+
+#[tokio::test]
+async fn a_gin_and_lemonade_or_neat() {
+    let h = harness().await;
+    let gin = product_id(&h, "gordons gin").await;
+    // "tonic" is the plain tonic, not the elderflower; "potato"-style ties between two plain options still ask
+    // (see choices::tests).
+    for (said, expect) in [
+        ("tonic", "Indian tonic"),
+        ("elderflower tonic", "elderflower"),
+        ("neat", "No mixer"),
+    ] {
+        let data = h
+            .run(
+                "mutation($p: ID!, $c: [String!]) { quote(pub: 254, table: 4, items: [{productId: $p, portion: \"double\", choices: $c}]) \
+                   { success error quote { lines { description } } } }",
+                json!({ "p": gin, "c": [said] }),
+            )
+            .await;
+        assert_eq!(data["quote"]["success"], true, "{said}: {data}");
+        let description = data["quote"]["quote"]["lines"][0]["description"]
+            .as_str()
+            .unwrap();
+        assert!(
+            description.contains("Double") && description.contains(expect),
+            "{said}: {description}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_meal_comes_with_its_drink_and_the_deal() {
+    let h = harness().await;
+    let drinks = h
+        .run(
+            "query($p: ID!) { pub(ref: 254) { menu { product(id: $p) { includedDrinks(search: \"guinness\") { id name } } } } }",
+            json!({ "p": WRAP }),
+        )
+        .await;
+    let guinness = drinks["pub"]["menu"]["product"]["includedDrinks"][0]["id"].clone();
+    assert_eq!(
+        drinks["pub"]["menu"]["product"]["includedDrinks"][0]["name"],
+        "Guinness"
+    );
+    let data = h
+        .run(
+            "mutation($p: ID!, $d: ID!) { basketAdd(pub: 254, table: 4, productId: $p, quantity: 2, \
+                 choices: [\"chips\", \"grilled\"], includeDrink: {productId: $d, portion: \"pint\"}) \
+               { success error basket { count lines { id name includedWith quantity } } } }",
+            json!({ "p": WRAP, "d": guinness }),
+        )
+        .await;
+    assert_eq!(data["basketAdd"]["success"], true, "{data}");
+    let lines = data["basketAdd"]["basket"]["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1]["name"], "Guinness");
+    assert_eq!(lines[1]["includedWith"], lines[0]["id"]);
+    assert_eq!(lines[1]["quantity"], 2);
+
+    let quoted = h
+        .run(
+            "mutation { quote { success error quote { summary savings { formatted } total { amount } lines { description deal } } } }",
+            json!({}),
+        )
+        .await;
+    let quote = &quoted["quote"]["quote"];
+    assert_eq!(quoted["quote"]["success"], true, "{quoted}");
+    assert_eq!(quote["savings"]["formatted"], "£3.92");
+    assert_eq!(
+        quote["lines"][1]["deal"],
+        "included with Chicken & stuffing wrap"
+    );
+    assert!(
+        quote["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Deals took off £3.92"),
+        "{quote}"
+    );
+
+    // Fewer meals, fewer drinks; no meal, no drink.
+    let meal = lines[0]["id"].as_str().unwrap();
+    let fewer = h
+        .run(
+            "mutation($l: ID!) { a: basketSet(lineId: $l, quantity: 1) { basket { lines { quantity } } } \
+               b: basketRemove(lineId: $l) { basket { count } } }",
+            json!({ "l": meal }),
+        )
+        .await;
+    assert_eq!(
+        fewer["a"]["basket"]["lines"],
+        json!([{ "quantity": 1 }, { "quantity": 1 }])
+    );
+    assert_eq!(fewer["b"]["basket"]["count"], 0);
+}
+
+#[tokio::test]
+async fn same_again_keeps_the_options_and_the_drink() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "mutation($p: ID!, $w: ID!) { quote(pub: 254, table: 4, items: [ \
+                 {productId: $p, choices: [\"garden peas\"]}, \
+                 {productId: $w, choices: [\"rice\", \"grilled\"], includeDrink: {productId: \"10000000311\"}}]) \
+               { success error quote { id } } }",
+            json!({ "p": FISH, "w": WRAP }),
+        )
+        .await;
+    assert_eq!(data["quote"]["success"], true, "{data}");
+    let again = h
+        .run(
+            "mutation($q: ID!) { basketFromQuote(quoteId: $q) { basket { ready lines { name options includedWith note } } } \
+               quote { success error quote { lines { description } } } }",
+            json!({ "q": data["quote"]["quote"]["id"] }),
+        )
+        .await;
+    let lines = again["basketFromQuote"]["basket"]["lines"]
+        .as_array()
+        .unwrap();
+    assert_eq!(lines.len(), 3, "{again}");
+    assert_eq!(lines[0]["options"], json!(["Garden Peas"]));
+    assert!(lines[2]["includedWith"].is_string());
+    assert_eq!(again["quote"]["success"], true, "{again}");
+}
+
+/// What the app's sheet sends: options by group id and option id, and the drink with no size.
+#[tokio::test]
+async fn the_sheet_adds_by_ids_with_a_drink() {
+    let h = harness().await;
+    let menu = h
+        .run(
+            "query($p: ID!) { pub(ref: 254) { menu(table: 4) { product(id: $p) { \
+               optionGroups { id name options { id label } } includedDrinks(search: \"guinness\") { id } } } } }",
+            json!({ "p": FISH }),
+        )
+        .await;
+    let product = &menu["pub"]["menu"]["product"];
+    let group = &product["optionGroups"][0];
+    let mushy = group["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["label"] == "Mushy Peas")
+        .unwrap_or_else(|| panic!("{group}"))["id"]
+        .clone();
+    let data = h
+        .run(
+            "mutation($p: ID!, $o: [OptionPickInput!], $d: IncludedDrinkInput) { \
+               basketAdd(pub: 254, productId: $p, portion: \"Standard\", options: $o, includeDrink: $d) \
+               { success error basket { lines { name options includedWith } } } }",
+            json!({ "p": FISH,
+                    "o": [{ "group": group["id"], "options": [mushy] }],
+                    "d": { "productId": product["includedDrinks"][0]["id"], "portion": null } }),
+        )
+        .await;
+    assert_eq!(data["basketAdd"]["success"], true, "{data}");
+    let lines = &data["basketAdd"]["basket"]["lines"];
+    assert_eq!(lines[0]["options"], json!(["Mushy Peas"]), "{data}");
+    assert_eq!(lines[1]["name"], "Guinness", "{data}");
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- **An MCP App shows pubs, the menu, the basket, quotes and orders beside the chat in hosts that support MCP Apps.** The menu has kind tabs, an instant filter, the guest ales picked out with their colour, strength and notes, and sizes to tap; the basket keeps the table big and editable; it all goes through the same `spoons` GraphQL, keeps in step with the model both ways, and never pays: paying stays in the conversation.
+
+### Changed
+
+- **The MCP server is a GraphQL API behind two tools, `spoons_schema` and `spoons`, replacing the seven.** Menus are whole, sorted into kinds (guest ales, which never say "ale", included) with ABV, units, calories, colour and taste notes; each conversation keeps a basket on the server; and `pay`, `cancelOrder` and `sendDuplicate` are PREVIEW then CONFIRM with a token bound to what was previewed.
+
 ## 0.3.3
 
 ### Changed

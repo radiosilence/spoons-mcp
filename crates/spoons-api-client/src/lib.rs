@@ -12,7 +12,7 @@ mod de;
 mod models;
 mod payments;
 
-pub use basket::{BasketLine, LineError};
+pub use basket::{BasketLine, LineError, describe, find_portion, groups_for, option_price};
 pub use card::{Card, CardError, Entered, PAYMENT_PAGE, enter};
 pub use client::{Client, Error, paths};
 pub use models::*;

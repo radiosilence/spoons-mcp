@@ -70,14 +70,23 @@ A line in the basket.
 """
 type BasketLine {
 	"""
-	What `basketRemove` and `basketSet` take: `<productId>:<portion>`.
+	What `basketRemove` and `basketSet` take.
 	"""
 	id: ID!
 	productId: ID!
 	name: String!
 	portion: String!
 	quantity: Int!
+	"""
+	The options chosen: `Peas`, `Chips`.
+	"""
+	options: [String!]!
+	"""
+	For a meal's included drink, the meal line's `id` it goes with; it follows the meal's quantity.
+	"""
+	includedWith: ID
 	kind: Kind!
+	colour: Colour
 	"""
 	One of it, at the menu's price for the basket's table.
 	"""
@@ -140,6 +149,49 @@ enum ConfirmAction {
 	Do it, with the token from PREVIEW and the same arguments. Only on the user's explicit yes.
 	"""
 	CONFIRM
+}
+
+"""
+A deal a product is part of. The till applies deals; a quote shows what they `savings`.
+"""
+type Deal {
+	"""
+	As the menu says it: `Includes a drink`, `Any 2 for £6.60`.
+	"""
+	name: String!
+	kind: DealKind!
+	"""
+	For a multi-buy, how many make the deal.
+	"""
+	buy: Int
+}
+
+"""
+What kind of deal.
+"""
+enum DealKind {
+	"""
+	A meal that comes with a drink: pass `includeDrink` with one from `includedDrinks`.
+	"""
+	INCLUDES_DRINK
+	"""
+	Any N for a price: the till takes it off when enough are ordered.
+	"""
+	MULTI_BUY
+	OTHER
+}
+
+"""
+The drink that comes with a meal.
+"""
+input IncludedDrinkInput {
+	productId: ID!
+	portion: String
+	"""
+	Its own options, such as a spirit's mixer.
+	"""
+	choices: [String!]
+	options: [OptionPickInput!]
 }
 
 """
@@ -229,13 +281,21 @@ type Menu {
 		kinds: [Kind!]
 	): [MenuSection!]!
 	"""
-	Every matching product, in the pub's order. Cursors are product ids.
+	Products, in the pub's order, or with `search`, best match first. Search forgives what voice gets wrong:
+	misheard words ("abot"), brand styling ("sumo" finds "Mad Squirrel $umo"), and what a drink is rather than
+	its name ("mocktail", "virgin", "alcohol free", "beer", "soft drink"), across name, the pub's category,
+	kind, style, notes and description. When nothing has every word, the nearest come back with
+	`closeMatches`. Cursors are product ids; page with `first` and `after`. Free once the menu is read.
 	"""
 	products(
 		"""
-		Only products matching every word.
+		What someone asked for, in their words.
 		"""
 		search: String,		kinds: [Kind!],
+		"""
+		Only the pub's own category (or group) of this name, from `categories`; forgiving.
+		"""
+		category: String,
 		"""
 		Only guest ales.
 		"""
@@ -250,6 +310,11 @@ type Menu {
 		first: Int,		after: String
 	): ProductConnection!
 	"""
+	The pub's own menu categories, as its app lists them ("0% cocktails", "Soft drinks", "Spritz cocktails"),
+	with each one's kind and how many products are in it. Pass a name to `products(category:)`. Free.
+	"""
+	categories: [MenuCategory!]!
+	"""
 	The guest real ales on now: the rotating casks, named "Brewery - Beer", that a search for "ale" misses.
 	"""
 	guestAles: [Product!]!
@@ -261,6 +326,18 @@ type Menu {
 	One product by id, whatever the menu's filters.
 	"""
 	product(id: ID!): Product
+}
+
+"""
+A category of the pub's own menu.
+"""
+type MenuCategory {
+	name: String!
+	"""
+	The kind most of it is; the first product's.
+	"""
+	kind: Kind!
+	count: Int!
 }
 
 """
@@ -321,7 +398,19 @@ type MutationRoot {
 		"""
 		A size's label or name, such as `Pint`; the default size when not given.
 		"""
-		portion: String,		quantity: Int! = 1
+		portion: String,		quantity: Int! = 1,
+		"""
+		Options as the user said them ("chips", "mushy peas", "lemonade", "neat") or by id: each lands in the group it answers.
+		"""
+		choices: [String!],
+		"""
+		Options by group, for when a word could answer two groups.
+		"""
+		options: [OptionPickInput!],
+		"""
+		For a meal that includes a drink (`deals`), the drink, from `includedDrinks`.
+		"""
+		includeDrink: IncludedDrinkInput
 	): BasketResult!
 	"""
 	Takes `quantity` off a basket line, or the whole line when not given. Free.
@@ -435,6 +524,48 @@ type OpeningHours {
 	"""
 	closes: String
 	closed: Boolean!
+}
+
+"""
+A question a product asks before it can be ordered, such as a mixer or a side. One option per group.
+"""
+type OptionGroup {
+	"""
+	What `options` and `choices` can name it by.
+	"""
+	id: ID!
+	"""
+	`Choose a side?`, `Mixer Choice`.
+	"""
+	name: String!
+	"""
+	Must be answered before it can be quoted. Ask the user; don't pick for them.
+	"""
+	required: Boolean!
+	"""
+	The menu never asks for more than one option a group: 1 when required, else 0.
+	"""
+	minPicks: Int!
+	maxPicks: Int!
+	"""
+	The sizes that ask it, when not every size does.
+	"""
+	sizes: [String!]!
+	options: [ProductOption!]!
+}
+
+"""
+Picks for one of a product's option groups.
+"""
+input OptionPickInput {
+	"""
+	The group's id, or words from its name ("side", "mixer").
+	"""
+	group: String
+	"""
+	Option ids or names. A group takes one.
+	"""
+	options: [String!]!
 }
 
 """
@@ -677,6 +808,29 @@ type Product {
 	Sold to over-18s only.
 	"""
 	ageRestricted: Boolean!
+	"""
+	The questions it asks before it can be ordered: a spirit's mixer, a meal's side. Answer them with
+	`choices` (the user's words, such as \"chips\" or \"lemonade\") or `options` on `basketAdd` or a quote item.
+	"""
+	optionGroups: [OptionGroup!]!
+	"""
+	Asks something that must be answered before ordering. Free.
+	"""
+	needsChoices: Boolean!
+	"""
+	The deals it's part of. Free.
+	"""
+	deals: [Deal!]!
+	"""
+	For a meal that includes a drink, the drinks it can come with, matching `search` (forgiving, as product
+	search is). Pass one as `includeDrink`. Free.
+	"""
+	includedDrinks(		search: String,
+		"""
+		At most this many, 20 when not given.
+		"""
+		first: Int
+	): [Product!]!
 }
 
 type ProductConnection {
@@ -696,6 +850,11 @@ type ProductConnection {
 	How many match, before paging.
 	"""
 	totalCount: Int!
+	"""
+	Nothing matched every word of the search, so these are the nearest, best first. Say so rather than
+	presenting them as what was asked for.
+	"""
+	closeMatches: Boolean!
 }
 
 """
@@ -710,6 +869,20 @@ type ProductEdge {
 	A cursor for use in pagination
 	"""
 	cursor: String!
+}
+
+"""
+One answer to an option group.
+"""
+type ProductOption {
+	id: ID!
+	label: String!
+	"""
+	What it adds to the price; nothing for most.
+	"""
+	price: Money!
+	kcal: Float
+	available: Boolean!
 }
 
 """
@@ -829,6 +1002,11 @@ type PubConnection {
 	How many match, before paging.
 	"""
 	totalCount: Int!
+	"""
+	Nothing matched every word of the search, so these are the nearest, best first. Say so rather than
+	presenting them as what was asked for.
+	"""
+	closeMatches: Boolean!
 }
 
 """
@@ -924,6 +1102,10 @@ type Quote {
 	table: Int!
 	lines: [QuoteLine!]!
 	"""
+	What deals took off (a meal's included drink, a multi-buy), when they did. Already out of `total`.
+	"""
+	savings: Money
+	"""
 	What will be charged, from the till.
 	"""
 	total: Money!
@@ -956,6 +1138,19 @@ input QuoteItemInput {
 	"""
 	portion: String
 	quantity: Int! = 1
+	"""
+	Options as the user said them ("chips", "mushy peas", "lemonade", "neat") or by id; each lands in the group
+	it answers. A required option left out is refused with the choices listed: ask the user, don't guess.
+	"""
+	choices: [String!]
+	"""
+	Options by group, for when a word could answer two groups.
+	"""
+	options: [OptionPickInput!]
+	"""
+	For a meal that includes a drink (see `deals`), the drink, from `includedDrinks`. The till takes the deal off.
+	"""
+	includeDrink: IncludedDrinkInput
 }
 
 """
@@ -966,6 +1161,18 @@ type QuoteLine {
 	name: String!
 	portion: String!
 	quantity: Int!
+	"""
+	The options chosen: `Peas`, `Chips`.
+	"""
+	options: [String!]!
+	"""
+	The line as a person reads it: `Steak & ale pudding (Peas, Chips)`.
+	"""
+	description: String!
+	"""
+	The deal it's ordered through: `included with Steak & ale pudding`.
+	"""
+	deal: String
 	"""
 	As the till priced the line.
 	"""

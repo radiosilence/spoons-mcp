@@ -5,7 +5,8 @@
 //! disk ([`crate::orders::Store`]), since a payment must be checkable after a restart; only the list of which ones
 //! this session made lives here.
 
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
 
 use tokio::sync::watch;
 
@@ -24,13 +25,29 @@ pub struct Item {
     /// `None` when it isn't on that table's menu.
     pub unit_price: Option<f64>,
     pub kind: Kind,
+    pub colour: Option<crate::catalogue::Colour>,
     /// Why it can't be quoted as it stands, such as being off the menu for the table.
     pub note: Option<String>,
+    /// The options chosen, as (group id, option id), and by name.
+    pub picks: Vec<(u64, u64)>,
+    pub choices: Vec<String>,
+    /// For a meal's included drink: the deal's category it's ordered through, and the meal line it goes with.
+    pub listing: Option<u64>,
+    pub with: Option<String>,
 }
 
 impl Item {
+    /// The product, size, options and deal: two pints of one beer are one line, a pudding with chips and one
+    /// with mash are two.
     pub fn id(&self) -> String {
-        line_id(self.product_id, &self.portion)
+        let mut id = line_id(self.product_id, &self.portion);
+        for (_, option) in &self.picks {
+            id.push_str(&format!("+{option}"));
+        }
+        if let (Some(listing), Some(with)) = (self.listing, &self.with) {
+            id.push_str(&format!("@{listing}/{with}"));
+        }
+        id
     }
 }
 
@@ -50,6 +67,26 @@ pub struct Basket {
 }
 
 impl Basket {
+    /// Keeps each meal's included drinks to as many as there are meals, dropping drinks whose meal has gone.
+    pub fn trim_drinks(&mut self) {
+        let mut room: std::collections::HashMap<String, u32> = self
+            .items
+            .iter()
+            .filter(|i| i.with.is_none())
+            .map(|i| (i.id(), i.quantity))
+            .collect();
+        for item in &mut self.items {
+            let Some(meal) = item.with.clone() else {
+                continue;
+            };
+            let left = room.entry(meal).or_insert(0);
+            let keep = item.quantity.min(*left);
+            *left -= keep;
+            item.quantity = keep;
+        }
+        self.items.retain(|i| i.quantity > 0);
+    }
+
     pub fn count(&self) -> u32 {
         self.items.iter().map(|item| item.quantity).sum()
     }
@@ -75,6 +112,8 @@ pub struct State {
 }
 
 pub struct Session {
+    /// Lets the app's own calls reach this basket even if the host gives them an MCP session of their own.
+    pub id: String,
     state: Mutex<State>,
     version: watch::Sender<u64>,
 }
@@ -82,9 +121,34 @@ pub struct Session {
 impl Default for Session {
     fn default() -> Self {
         Self {
+            id: uuid::Uuid::new_v4().simple().to_string(),
             state: Mutex::default(),
             version: watch::channel(0).0,
         }
+    }
+}
+
+/// Live sessions by id, each with the receipt address it belongs to, so an app's call can name its conversation's
+/// basket and nobody else's.
+#[derive(Default)]
+pub struct Registry {
+    sessions: Mutex<HashMap<String, (String, Weak<Session>)>>,
+}
+
+impl Registry {
+    pub fn register(&self, session: &Arc<Session>, tenant: &str) {
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.retain(|_, (_, s)| s.strong_count() > 0);
+        sessions
+            .entry(session.id.clone())
+            .or_insert_with(|| (tenant.to_owned(), Arc::downgrade(session)));
+    }
+
+    /// The session with this id, if it's alive and the caller's own.
+    pub fn find(&self, id: &str, tenant: &str) -> Option<Arc<Session>> {
+        let sessions = self.sessions.lock().unwrap();
+        let (owner, session) = sessions.get(id)?;
+        (owner == tenant).then(|| session.upgrade()).flatten()
     }
 }
 
@@ -109,6 +173,7 @@ impl Session {
         let mut state = self.state.lock().unwrap();
         let mut basket = state.basket.clone();
         let result = change(&mut basket)?;
+        basket.trim_drinks();
         basket.version = state.basket.version + 1;
         let version = basket.version;
         state.basket = basket;

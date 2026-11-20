@@ -83,6 +83,9 @@ pub struct LatLngInput {
 pub struct CountFields {
     /// How many match, before paging.
     pub total_count: u64,
+    /// Nothing matched every word of the search, so these are the nearest, best first. Say so rather than
+    /// presenting them as what was asked for.
+    pub close_matches: bool,
 }
 
 pub type ListConnection<T> = Connection<String, T, CountFields>;
@@ -94,6 +97,7 @@ pub fn page<T: async_graphql::OutputType>(
     first: Option<i32>,
     default: usize,
     most: usize,
+    close_matches: bool,
 ) -> Result<ListConnection<T>> {
     let total = items.len();
     let start = match after {
@@ -120,6 +124,7 @@ pub fn page<T: async_graphql::OutputType>(
         end < total,
         CountFields {
             total_count: total as u64,
+            close_matches,
         },
     );
     connection.edges.extend(
@@ -536,6 +541,7 @@ impl Menu {
         Product {
             entry: entry.clone(),
             currency: self.pub_.currency_code(),
+            catalogue: self.catalogue.clone(),
         }
     }
 
@@ -547,10 +553,22 @@ impl Menu {
         self.catalogue.entries.iter().filter(move |e| {
             self.kinds.as_deref().is_none_or(|k| k.contains(&e.kind))
                 && kinds.is_none_or(|k| k.contains(&e.kind))
-                && self.search.as_deref().is_none_or(|s| e.matches(s))
-                && search.is_none_or(|s| e.matches(s))
+                && self
+                    .search
+                    .as_deref()
+                    .is_none_or(|s| crate::search::product_matches(s, e))
+                && search.is_none_or(|s| crate::search::product_matches(s, e))
         })
     }
+}
+
+/// A category of the pub's own menu.
+#[derive(SimpleObject, Clone)]
+pub struct MenuCategory {
+    pub name: String,
+    /// The kind most of it is; the first product's.
+    pub kind: Kind,
+    pub count: u32,
 }
 
 /// One kind's products on a menu.
@@ -621,24 +639,72 @@ impl Menu {
             })
             .collect()
     }
-    /// Every matching product, in the pub's order. Cursors are product ids.
+    /// Products, in the pub's order, or with `search`, best match first. Search forgives what voice gets wrong:
+    /// misheard words ("abot"), brand styling ("sumo" finds "Mad Squirrel $umo"), and what a drink is rather than
+    /// its name ("mocktail", "virgin", "alcohol free", "beer", "soft drink"), across name, the pub's category,
+    /// kind, style, notes and description. When nothing has every word, the nearest come back with
+    /// `closeMatches`. Cursors are product ids; page with `first` and `after`. Free once the menu is read.
     #[allow(clippy::too_many_arguments)]
     async fn products(
         &self,
-        #[graphql(desc = "Only products matching every word.")] search: Option<String>,
+        #[graphql(desc = "What someone asked for, in their words.")] search: Option<String>,
         kinds: Option<Vec<Kind>>,
+        #[graphql(
+            desc = "Only the pub's own category (or group) of this name, from `categories`; forgiving."
+        )]
+        category: Option<String>,
         #[graphql(desc = "Only guest ales.", default = false)] guest_only: bool,
         #[graphql(desc = "Only what can be ordered now.", default = false)] orderable_only: bool,
         #[graphql(desc = "Page size, 50 when not given, at most 300.")] first: Option<i32>,
         after: Option<String>,
     ) -> Result<ListConnection<Product>> {
-        let items = self
-            .matching(search.as_deref(), kinds.as_deref())
+        let wanted = category.as_deref();
+        // The menu's own search ranks too, when this field has none.
+        let search = search.or_else(|| self.search.clone());
+        let filtered = self
+            .matching(None, kinds.as_deref())
             .filter(|e| !guest_only || e.guest)
             .filter(|e| !orderable_only || e.orderable())
+            .filter(|e| {
+                wanted.is_none_or(|w| {
+                    [Some(e.category.as_str()), e.group.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|c| crate::search::category_matches(w, c))
+                })
+            })
+            .collect::<Vec<&Entry>>();
+        let (entries, close): (Vec<&Entry>, bool) = match search
+            .as_deref()
+            .and_then(|s| crate::search::products(s, filtered.iter().copied()))
+        {
+            Some(ranked) => (
+                ranked.items.into_iter().map(|(_, e)| e).collect(),
+                ranked.close,
+            ),
+            None => (filtered, false),
+        };
+        let items = entries
+            .into_iter()
             .map(|e| (e.product.id.to_string(), self.wrap(e)))
             .collect();
-        page(items, after, first, 50, 300)
+        page(items, after, first, 50, 300, close)
+    }
+    /// The pub's own menu categories, as its app lists them ("0% cocktails", "Soft drinks", "Spritz cocktails"),
+    /// with each one's kind and how many products are in it. Pass a name to `products(category:)`. Free.
+    async fn categories(&self) -> Vec<MenuCategory> {
+        let mut out: Vec<MenuCategory> = Vec::new();
+        for e in self.matching(None, None) {
+            match out.iter_mut().find(|c| c.name == e.category) {
+                Some(c) => c.count += 1,
+                None => out.push(MenuCategory {
+                    name: e.category.clone(),
+                    kind: e.kind,
+                    count: 1,
+                }),
+            }
+        }
+        out
     }
     /// The guest real ales on now: the rotating casks, named "Brewery - Beer", that a search for "ale" misses.
     async fn guest_ales(&self) -> Vec<Product> {
@@ -670,6 +736,55 @@ impl Menu {
 pub struct Product {
     pub entry: Entry,
     pub currency: &'static str,
+    pub catalogue: Arc<Catalogue>,
+}
+
+/// A question a product asks before it can be ordered, such as a mixer or a side. One option per group.
+#[derive(SimpleObject, Clone)]
+pub struct OptionGroup {
+    /// What `options` and `choices` can name it by.
+    pub id: ID,
+    /// `Choose a side?`, `Mixer Choice`.
+    pub name: String,
+    /// Must be answered before it can be quoted. Ask the user; don't pick for them.
+    pub required: bool,
+    /// The menu never asks for more than one option a group: 1 when required, else 0.
+    pub min_picks: i32,
+    pub max_picks: i32,
+    /// The sizes that ask it, when not every size does.
+    pub sizes: Vec<String>,
+    pub options: Vec<ProductOption>,
+}
+
+/// One answer to an option group.
+#[derive(SimpleObject, Clone)]
+pub struct ProductOption {
+    pub id: ID,
+    pub label: String,
+    /// What it adds to the price; nothing for most.
+    pub price: Money,
+    pub kcal: Option<f64>,
+    pub available: bool,
+}
+
+/// What kind of deal.
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum DealKind {
+    /// A meal that comes with a drink: pass `includeDrink` with one from `includedDrinks`.
+    IncludesDrink,
+    /// Any N for a price: the till takes it off when enough are ordered.
+    MultiBuy,
+    Other,
+}
+
+/// A deal a product is part of. The till applies deals; a quote shows what they `savings`.
+#[derive(SimpleObject, Clone)]
+pub struct Deal {
+    /// As the menu says it: `Includes a drink`, `Any 2 for £6.60`.
+    pub name: String,
+    pub kind: DealKind,
+    /// For a multi-buy, how many make the deal.
+    pub buy: Option<i32>,
 }
 
 /// One size a product comes in, with its price at this table.
@@ -782,6 +897,136 @@ impl Product {
     async fn age_restricted(&self) -> bool {
         self.entry.product.age_restriction.is_some_and(|a| a >= 18)
     }
+    /// The questions it asks before it can be ordered: a spirit's mixer, a meal's side. Answer them with
+    /// `choices` (the user's words, such as \"chips\" or \"lemonade\") or `options` on `basketAdd` or a quote item.
+    async fn option_groups(&self) -> Vec<OptionGroup> {
+        let product = &self.entry.product;
+        let sizes: Vec<&spoons_api_client::PortionOption> = product
+            .options
+            .portion
+            .iter()
+            .flat_map(|p| &p.options)
+            .filter(|o| !o.value.hidden)
+            .collect();
+        product
+            .options
+            .choices
+            .iter()
+            .filter_map(|group| {
+                let asking: Vec<&&spoons_api_client::PortionOption> = sizes
+                    .iter()
+                    .filter(|s| s.value.choices.iter().any(|c| c.choice_id == group.id))
+                    .collect();
+                if asking.is_empty() {
+                    return None;
+                }
+                let required = group.required
+                    || asking.iter().any(|s| {
+                        s.value
+                            .choices
+                            .iter()
+                            .any(|c| c.choice_id == group.id && c.required)
+                    });
+                Some(OptionGroup {
+                    id: ID(group.id.to_string()),
+                    name: group.title().to_owned(),
+                    required,
+                    min_picks: i32::from(required),
+                    max_picks: 1,
+                    sizes: if asking.len() == sizes.len() {
+                        Vec::new()
+                    } else {
+                        asking
+                            .iter()
+                            .map(|s| s.label.split(" (").next().unwrap_or(&s.label).to_owned())
+                            .collect()
+                    },
+                    options: group
+                        .options
+                        .iter()
+                        .map(|o| ProductOption {
+                            id: ID(o.id.to_string()),
+                            label: o.name.clone(),
+                            price: Money::new(
+                                spoons_api_client::option_price(o).unwrap_or(0.0),
+                                self.currency,
+                            ),
+                            kcal: o.calories,
+                            available: !o.is_out_of_stock,
+                        })
+                        .collect(),
+                })
+            })
+            .collect()
+    }
+    /// Asks something that must be answered before ordering. Free.
+    async fn needs_choices(&self) -> bool {
+        let product = &self.entry.product;
+        product
+            .options
+            .portion
+            .iter()
+            .flat_map(|p| &p.options)
+            .any(|o| o.value.choices.iter().any(|c| c.required))
+    }
+    /// The deals it's part of. Free.
+    async fn deals(&self) -> Vec<Deal> {
+        self.entry
+            .product
+            .options
+            .linked
+            .iter()
+            .filter(|l| !l.name.trim().is_empty())
+            .map(|l| {
+                let name = l.name.trim().to_owned();
+                let lower = name.to_lowercase();
+                let buy = regex::Regex::new(r"(?i)any (\d+) for")
+                    .ok()
+                    .and_then(|re| re.captures(&name))
+                    .and_then(|c| c[1].parse().ok());
+                let kind = if lower.contains("includes a drink") {
+                    DealKind::IncludesDrink
+                } else if buy.is_some() {
+                    DealKind::MultiBuy
+                } else {
+                    DealKind::Other
+                };
+                Deal { name, kind, buy }
+            })
+            .collect()
+    }
+    /// For a meal that includes a drink, the drinks it can come with, matching `search` (forgiving, as product
+    /// search is). Pass one as `includeDrink`. Free.
+    async fn included_drinks(
+        &self,
+        search: Option<String>,
+        #[graphql(desc = "At most this many, 20 when not given.")] first: Option<i32>,
+    ) -> Vec<Product> {
+        let Some(deal) = self.catalogue.included_drinks(&self.entry.product) else {
+            return Vec::new();
+        };
+        let entries: Vec<&Entry> = deal
+            .products
+            .iter()
+            .filter_map(|p| self.catalogue.get(p.id))
+            .collect();
+        let ranked: Vec<&Entry> = match search
+            .as_deref()
+            .and_then(|s| crate::search::products(s, entries.iter().copied()))
+        {
+            Some(r) => r.items.into_iter().map(|(_, e)| e).collect(),
+            None => entries,
+        };
+        ranked
+            .into_iter()
+            .take(first.map_or(20, |f| usize::try_from(f.max(1)).unwrap_or(20)))
+            .map(|e| Product {
+                entry: e.clone(),
+                currency: self.currency,
+                catalogue: self.catalogue.clone(),
+            })
+            .collect()
+    }
 }
 
 impl Product {
@@ -808,13 +1053,18 @@ pub struct Basket {
 /// A line in the basket.
 #[derive(SimpleObject, Clone)]
 pub struct BasketLine {
-    /// What `basketRemove` and `basketSet` take: `<productId>:<portion>`.
+    /// What `basketRemove` and `basketSet` take.
     pub id: ID,
     pub product_id: ID,
     pub name: String,
     pub portion: String,
     pub quantity: i32,
+    /// The options chosen: `Peas`, `Chips`.
+    pub options: Vec<String>,
+    /// For a meal's included drink, the meal line's `id` it goes with; it follows the meal's quantity.
+    pub included_with: Option<ID>,
     pub kind: Kind,
+    pub colour: Option<Colour>,
     /// One of it, at the menu's price for the basket's table.
     pub unit_price: Option<Money>,
     pub line_total: Option<Money>,
@@ -839,7 +1089,13 @@ impl Basket {
         let lines = b
             .items
             .iter()
-            .map(|i| format!("{} × {} ({})", i.quantity, i.name, i.portion))
+            .map(|i| {
+                let what = describe_line(&i.name, &i.portion, &i.choices);
+                match &i.with {
+                    Some(_) => format!("{} × {what}, included with the meal", i.quantity),
+                    None => format!("{} × {what}", i.quantity),
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
         let place = match (&b.table, &b.pub_ref) {
@@ -885,7 +1141,10 @@ impl Basket {
                 name: i.name.clone(),
                 portion: i.portion.clone(),
                 quantity: i.quantity as i32,
+                options: i.choices.clone(),
+                included_with: i.with.clone().map(ID),
                 kind: i.kind,
+                colour: i.colour.as_ref().map(Colour::from),
                 unit_price: i.unit_price.map(|p| Money::new(p, currency)),
                 line_total: i
                     .unit_price
@@ -989,6 +1248,22 @@ pub struct Quote {
     pub order: Stored,
 }
 
+/// "Steak & ale pudding (Peas, Chips)", "Hennessy VS (Double, R White's lemonade)", "Carling (Pint)": the size when
+/// there's a choice of size, and the options.
+pub fn describe_line(name: &str, portion: &str, options: &[String]) -> String {
+    let size = portion.split(" (").next().unwrap_or(portion).trim();
+    let mut parts: Vec<&str> = Vec::new();
+    if !size.eq_ignore_ascii_case("standard") && !size.is_empty() {
+        parts.push(size);
+    }
+    parts.extend(options.iter().map(String::as_str));
+    if parts.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{name} ({})", parts.join(", "))
+    }
+}
+
 /// One line of a quote.
 #[derive(SimpleObject, Clone)]
 pub struct QuoteLine {
@@ -996,6 +1271,12 @@ pub struct QuoteLine {
     pub name: String,
     pub portion: String,
     pub quantity: i32,
+    /// The options chosen: `Peas`, `Chips`.
+    pub options: Vec<String>,
+    /// The line as a person reads it: `Steak & ale pudding (Peas, Chips)`.
+    pub description: String,
+    /// The deal it's ordered through: `included with Steak & ale pudding`.
+    pub deal: Option<String>,
     /// As the till priced the line.
     pub till_price: Option<Money>,
     /// One of it as the menu priced it.
@@ -1022,19 +1303,34 @@ impl Quote {
         let lines = o
             .lines
             .iter()
-            .map(|l| format!("{} × {} ({})", l.quantity, l.name, l.portion))
+            .map(|l| {
+                let what = describe_line(&l.name, &l.portion, &l.choices);
+                match &l.deal {
+                    Some(deal) => format!("{} × {what}, {deal}", l.quantity),
+                    None => format!("{} × {what}", l.quantity),
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
         let total = Money::new(o.total, &o.currency).formatted;
+        let saved = o.savings.unwrap_or(0.0);
+        let deals = if saved > 0.004 {
+            format!(
+                " Deals took off {}.",
+                Money::new(saved, &o.currency).formatted
+            )
+        } else {
+            String::new()
+        };
         let differs = match self.menu_sum() {
-            Some(menu) if (menu - o.total).abs() > 0.005 => format!(
+            Some(menu) if (menu - saved - o.total).abs() > 0.005 => format!(
                 " The menu says {}; the till's price is the one charged.",
                 Money::new(menu, &o.currency).formatted
             ),
             _ => String::new(),
         };
         format!(
-            "{lines} to table {} at {}: {total}.{differs}",
+            "{lines} to table {} at {}: {total}.{deals}{differs}",
             o.table, o.venue_name
         )
     }
@@ -1067,10 +1363,19 @@ impl Quote {
                 name: l.name.clone(),
                 portion: l.portion.clone(),
                 quantity: l.quantity as i32,
+                options: l.choices.clone(),
+                description: describe_line(&l.name, &l.portion, &l.choices),
+                deal: l.deal.clone(),
                 till_price: l.price.map(|p| Money::new(p, currency)),
                 menu_price: l.menu_price.map(|p| Money::new(p, currency)),
             })
             .collect()
+    }
+    /// What deals took off (a meal's included drink, a multi-buy), when they did. Already out of `total`.
+    async fn savings(&self) -> Option<Money> {
+        self.order
+            .savings
+            .map(|s| Money::new(s, &self.order.currency))
     }
     /// What will be charged, from the till.
     async fn total(&self) -> Money {
@@ -1082,8 +1387,9 @@ impl Quote {
     }
     /// The till charges something other than the menu says.
     async fn differs_from_menu(&self) -> bool {
-        self.menu_sum()
-            .is_some_and(|m| (m - self.order.total).abs() > 0.005)
+        self.menu_sum().is_some_and(|m| {
+            (m - self.order.savings.unwrap_or(0.0) - self.order.total).abs() > 0.005
+        })
     }
     /// When it was quoted, in London.
     async fn created_at(&self) -> String {
@@ -1181,6 +1487,32 @@ pub struct QuoteItemInput {
     pub portion: Option<String>,
     #[graphql(default = 1)]
     pub quantity: i32,
+    /// Options as the user said them ("chips", "mushy peas", "lemonade", "neat") or by id; each lands in the group
+    /// it answers. A required option left out is refused with the choices listed: ask the user, don't guess.
+    pub choices: Option<Vec<String>>,
+    /// Options by group, for when a word could answer two groups.
+    pub options: Option<Vec<OptionPickInput>>,
+    /// For a meal that includes a drink (see `deals`), the drink, from `includedDrinks`. The till takes the deal off.
+    pub include_drink: Option<IncludedDrinkInput>,
+}
+
+/// Picks for one of a product's option groups.
+#[derive(InputObject, Clone, Debug)]
+pub struct OptionPickInput {
+    /// The group's id, or words from its name ("side", "mixer").
+    pub group: Option<String>,
+    /// Option ids or names. A group takes one.
+    pub options: Vec<String>,
+}
+
+/// The drink that comes with a meal.
+#[derive(InputObject, Clone, Debug)]
+pub struct IncludedDrinkInput {
+    pub product_id: ID,
+    pub portion: Option<String>,
+    /// Its own options, such as a spirit's mixer.
+    pub choices: Option<Vec<String>>,
+    pub options: Option<Vec<OptionPickInput>>,
 }
 
 /// A basket change: whether it took, and the basket either way.

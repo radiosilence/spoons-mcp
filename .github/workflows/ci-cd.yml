@@ -43,6 +43,7 @@ jobs:
       contents: read
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      app: ${{ steps.filter.outputs.app }}
       deps: ${{ steps.filter.outputs.deps }}
       build: ${{ steps.filter.outputs.build }}
       release: ${{ steps.filter.outputs.release }}
@@ -73,7 +74,7 @@ jobs:
         # a condition, and no grep exits early (`-q`) on a pipe whose writer
         # would then fail.
         run: |
-          rust=true deps=true build=true release=false
+          rust=true app=true deps=true build=true release=false
           version_of() { sed -n 's/^version = "\(.*\)"/\1/p' | head -1; }
           base=HEAD^1
           if [ "$EVENT" = "push" ]; then
@@ -131,6 +132,8 @@ jobs:
             # mise.toml reach no job: each installs its toolchain itself and
             # runs cargo directly.
             touches '^crates/|^Cargo\.(toml|lock)$|^\.cargo/|^rust-toolchain|^\.?(rustfmt|clippy)\.toml$|^\.github/' || rust=false
+            # The MCP App's sources and the built page the server embeds, which must match them.
+            touches '^crates/spoons-mcp/(app|assets)/|^justfile$|^mise\.toml$|^\.github/' || app=false
             if [ "$EVENT" = "pull_request" ]; then
               # A new advisory can land on any day; main audits every push.
               touches '^Cargo\.lock$|Cargo\.toml$|^\.cargo/|^\.github/' || deps=false
@@ -144,6 +147,7 @@ jobs:
           fi
           {
             echo "rust=$rust"
+            echo "app=$app"
             echo "deps=$deps"
             echo "build=$build"
             echo "release=$release"
@@ -200,6 +204,22 @@ jobs:
         with:
           toolchain: stable
       - run: cargo fmt --all -- --check
+
+  # The MCP App: its types, and that the committed assets/app.html is what its
+  # sources build. Committed so the Rust build, the musl build and the image
+  # need no Node.
+  app:
+    name: App
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: just node aube
+      - run: just app-fresh
 
   audit:
     name: Security Audit
@@ -358,7 +378,7 @@ jobs:
     name: Checks
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, actionlint, test, lint, format, audit, changelog, build, container]
+    needs: [changes, actionlint, test, lint, format, app, audit, changelog, build, container]
     if: always()
     steps:
       - env:

@@ -5,3 +5,6 @@ rust = { version = "latest", components = "rustfmt,clippy" }
 "aqua:koalaman/shellcheck" = "0.11.0"
 just = "latest"
 lefthook = "latest"
+# The MCP App's build (`just app`). Exact, and the same in CI, so neither rewrites the lockfile.
+node = "24"
+aube = "2.8.5"
