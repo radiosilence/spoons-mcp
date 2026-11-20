@@ -220,8 +220,9 @@ async function lastResultText(page) {
   await menu.app.waitForSelector(".sheet .choice-group", { timeout: 15000 });
   await sleep(400);
   await menu.outer?.screenshot?.({ path: join(out, "sheet-380-light.png") });
-  await menu.app.click(".sheet >> text=Mushy Peas");
-  await menu.app.click(".sheet .choice.drink >> text=Guinness");
+  // Quoted: an exact match, since the question "Peas, mushy peas or beans?" also contains the words.
+  await menu.app.click('.sheet .choice >> text="Mushy Peas"');
+  await menu.app.click('.sheet .choice.drink >> text="Guinness"');
   await sleep(300);
   await menu.outer.screenshot({ path: join(out, "sheet-picked-380-light.png"), animations: "disabled" });
   await menu.app.click(".sheet-foot .primary");
