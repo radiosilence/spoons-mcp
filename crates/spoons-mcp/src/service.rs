@@ -503,13 +503,7 @@ impl Service {
             .await
             .map_err(fail)
             .map_err(forget)?;
-        if validation.items.len() == lines.len() {
-            for (line, priced) in lines.iter_mut().zip(&validation.items) {
-                if priced.id == line.product_id {
-                    line.price = Some(priced.price.value);
-                }
-            }
-        }
+        price_lines(&mut lines, &validation.items);
         let order = Order {
             quote_id: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
             created_at: now(),
@@ -975,5 +969,26 @@ impl Service {
             .await
             .map_err(fail)?;
         Ok((order, status))
+    }
+}
+
+/// Puts the till's price on each line. The till answers in the basket's order, but not always with the product's
+/// own id: a guest ale listed as `1000000111111512` comes back as `10000001111`. So a line takes the till's line
+/// with its id, else one whose id begins its id, else the one in its place when the till answered every line.
+fn price_lines(lines: &mut [Line], priced: &[spoons_api_client::ValidatedLine]) {
+    let mut used = vec![false; priced.len()];
+    let in_place = priced.len() == lines.len();
+    for (at, line) in lines.iter_mut().enumerate() {
+        let own = line.product_id.to_string();
+        let found = (0..priced.len())
+            .find(|&i| !used[i] && priced[i].id == line.product_id)
+            .or_else(|| {
+                (0..priced.len()).find(|&i| !used[i] && own.starts_with(&priced[i].id.to_string()))
+            })
+            .or_else(|| (in_place && !used[at]).then_some(at));
+        if let Some(i) = found {
+            used[i] = true;
+            line.price = Some(priced[i].price.value);
+        }
     }
 }
