@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5
+
+### Fixed
+
+- **Every card for a round agrees once it's paid.** A quote card keeps checking its quote while on screen, so a card drawn before paying, or again afterwards, turns into the order and loses its Confirm payment button; and Claude is told not to quote a paid round again.
+
 ## 0.5.4
 
 ### Fixed
