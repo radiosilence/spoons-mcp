@@ -776,18 +776,19 @@ type Pub {
 	"""
 	waitTimes: WaitTimes
 	"""
-	The real ales on now and those coming soon, with their styles and colours. One request.
+	The real ales on now and those coming soon, with their styles and colours. One request; null when the
+	list couldn't be read, which isn't the same as none on.
 	"""
-	ales: [Ale!]!
+	ales: [Ale!]
 	"""
-	Its tables. One request.
+	Its tables. One request; null when they couldn't be read.
 	"""
 	tables(
 		"""
 		Only those taking orders now.
 		"""
 		availableOnly: Boolean! = false
-	): [Table!]!
+	): [Table!]
 	"""
 	Everything the pub sells to a table, sorted into kinds, with sizes and prices. Parts of a pub such as a
 	garden can have their own menu and prices, so pass the `table` being ordered to when there is one.

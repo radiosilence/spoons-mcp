@@ -384,37 +384,37 @@ impl Pub {
                 updated_at: w.updated_at,
             })
     }
-    /// The real ales on now and those coming soon, with their styles and colours. One request.
-    async fn ales(&self, ctx: &Context<'_>) -> Result<Vec<Ale>> {
+    /// The real ales on now and those coming soon, with their styles and colours. One request; null when the
+    /// list couldn't be read, which isn't the same as none on.
+    async fn ales(&self, ctx: &Context<'_>) -> Result<Option<Vec<Ale>>> {
         Ok(loader(ctx)
             .load_one(AlesKey(self.venue.venue_ref))
             .await
             .map_err(gql)?
-            .unwrap_or_default()
-            .into_iter()
-            .map(Ale)
-            .collect())
+            .map(|ales| ales.into_iter().map(Ale).collect()))
     }
-    /// Its tables. One request.
+    /// Its tables. One request; null when they couldn't be read.
     async fn tables(
         &self,
         ctx: &Context<'_>,
         #[graphql(desc = "Only those taking orders now.", default = false)] available_only: bool,
-    ) -> Result<Vec<Table>> {
+    ) -> Result<Option<Vec<Table>>> {
         Ok(loader(ctx)
             .load_one(TablesKey(self.venue.venue_ref))
             .await
             .map_err(gql)?
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|t| !available_only || t.available)
-            .map(|t| Table {
-                number: t.number as i32,
-                name: t.name,
-                available: t.available,
-                sales_area: t.sales_area_id as i64,
-            })
-            .collect())
+            .map(|tables| {
+                tables
+                    .into_iter()
+                    .filter(|t| !available_only || t.available)
+                    .map(|t| Table {
+                        number: t.number as i32,
+                        name: t.name,
+                        available: t.available,
+                        sales_area: t.sales_area_id as i64,
+                    })
+                    .collect()
+            }))
     }
     /// Everything the pub sells to a table, sorted into kinds, with sizes and prices. Parts of a pub such as a
     /// garden can have their own menu and prices, so pass the `table` being ordered to when there is one.

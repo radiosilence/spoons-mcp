@@ -47,8 +47,8 @@ macro_rules! per_pub {
                         .map(|value| (*key, value))
                 }))
                 .await;
-                // One pub failing leaves its fields null rather than failing every pub in the list; only when
-                // nothing loaded is it an error.
+                // One pub failing leaves its fields null rather than failing every pub in the list; when nothing
+                // loaded, the API is down, and that's an error, not a list of empty pubs.
                 let mut found = HashMap::new();
                 let mut first_error = None;
                 for result in loaded {
@@ -63,7 +63,7 @@ macro_rules! per_pub {
                     }
                 }
                 match first_error {
-                    Some(error) if found.is_empty() && keys.len() == 1 => Err(Arc::new(error)),
+                    Some(error) if found.is_empty() => Err(Arc::new(error)),
                     _ => Ok(found),
                 }
             }

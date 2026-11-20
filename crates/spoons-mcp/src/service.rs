@@ -338,13 +338,19 @@ impl Service {
                     )
                 })
                 .map_err(forget)?;
-            let line = BasketLine::new(
-                entry.category_id,
-                &entry.product,
-                item.portion.as_deref(),
-                item.quantity,
-            )
-            .map_err(fail)?;
+            // A size can be named as the menu labels it or by its name alone ("250ml glass"); the till matches
+            // labels, so a name becomes its label here.
+            let portion = item.portion.as_deref().map(|wanted| {
+                entry
+                    .sizes
+                    .iter()
+                    .find(|s| {
+                        s.label.eq_ignore_ascii_case(wanted) || s.name.eq_ignore_ascii_case(wanted)
+                    })
+                    .map_or(wanted, |s| s.label.as_str())
+            });
+            let line = BasketLine::new(entry.category_id, &entry.product, portion, item.quantity)
+                .map_err(fail)?;
             let menu_price = entry
                 .sizes
                 .iter()
