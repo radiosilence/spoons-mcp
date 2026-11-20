@@ -2,9 +2,9 @@
 
 const MONEY = "{ amount formatted }";
 
-export const PRODUCT = `id name shortName brewery kind guest category group tasteNotes origin style abv units kcal
-  colour { hex label } orderable whyNot outOfStock vegan
-  portions { label name price ${MONEY} isDefault units kcal millilitres }`;
+/** Only what the menu draws: a pub's whole menu is hundreds of products, and every byte crosses the host. */
+export const PRODUCT = `id name shortName brewery kind guest tasteNotes origin style abv units
+  colour { hex } orderable whyNot vegan portions { name price { formatted } isDefault }`;
 
 const PUB_CARD = `ref name town postcode distanceMetres trading openNow hoursToday { opens closes closed }
   waitTimes { drinkMinutes foodMinutes }`;
@@ -14,10 +14,18 @@ export const PUBS = `query($q: String, $near: LatLngInput) {
 
 export const PUB = `query($ref: Int!) { pub(ref: $ref) { ${PUB_CARD} } }`;
 
-export const MENU = `query($ref: Int!, $table: Int) { pub(ref: $ref) { ${PUB_CARD}
+/** Drinks first; food, half of a menu, when someone opens it. */
+export const DRINKS: string[] = ["CASK_ALE", "LAGER", "CRAFT_AND_WORLD", "STOUT", "CIDER", "WINE", "SPIRITS",
+  "COCKTAILS", "ALCOHOL_FREE", "SOFT", "HOT"];
+
+export const MENU = `query($ref: Int!, $table: Int, $kinds: [Kind!]) { pub(ref: $ref) { ${PUB_CARD}
   menu(table: $table) { table totalCount
-    sections { kind label count products { ${PRODUCT} } }
-    comingSoon { fullName abv style colour { hex label } } } } }`;
+    all: sections { kind label count }
+    sections(kinds: $kinds) { kind label count products { ${PRODUCT} } }
+    comingSoon { fullName abv colour { hex } } } } }`;
+
+export const MENU_KINDS = `query($ref: Int!, $table: Int, $kinds: [Kind!]) { pub(ref: $ref) {
+  menu(table: $table) { sections(kinds: $kinds) { kind label count products { ${PRODUCT} } } } } }`;
 
 export const BASKET_FIELDS = `version table count ready summary menuTotal ${MONEY} pub { ref name }
   lines { id productId name portion quantity kind colour { hex label } unitPrice ${MONEY} lineTotal ${MONEY} note }`;

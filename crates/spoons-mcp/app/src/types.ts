@@ -26,13 +26,9 @@ export interface Colour {
 }
 
 export interface Portion {
-  label: string;
   name: string;
-  price: Money;
+  price: { formatted: string };
   isDefault: boolean;
-  units: number | null;
-  kcal: number | null;
-  millilitres: number | null;
 }
 
 export interface Product {
@@ -42,19 +38,15 @@ export interface Product {
   brewery: string | null;
   kind: Kind;
   guest: boolean;
-  category: string;
-  group: string | null;
   tasteNotes: string[];
   origin: string | null;
   style: string | null;
   abv: number | null;
   units: number | null;
-  kcal: number | null;
-  colour: Colour | null;
+  colour: { hex: string } | null;
   portions: Portion[];
   orderable: boolean;
   whyNot: string | null;
-  outOfStock: boolean;
   vegan: boolean;
 }
 
@@ -86,8 +78,10 @@ export interface PubCard {
 export interface Menu {
   table: number | null;
   totalCount: number;
+  /** Every kind on the menu with its count, loaded or not. */
+  all: { kind: Kind; label: string; count: number }[];
   sections: Section[];
-  comingSoon: { fullName: string | null; abv: number | null; style: string | null; colour: Colour | null }[];
+  comingSoon: { fullName: string | null; abv: number | null; colour: { hex: string } | null }[];
 }
 
 export interface BasketLine {

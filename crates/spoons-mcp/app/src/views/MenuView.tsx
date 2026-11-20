@@ -11,7 +11,7 @@ type Loaded = PubCard & { menu: Menu };
 
 /** What a search matches: every word, in the name, brewery, style, kind, category or notes. */
 function matches(p: Product, words: string[]): boolean {
-  const hay = [p.name, p.brewery, p.style, p.category, p.group, p.kind.replace(/_/g, " "), ...p.tasteNotes]
+  const hay = [p.name, p.brewery, p.style, p.origin, p.kind.replace(/_/g, " "), ...p.tasteNotes]
     .filter(Boolean)
     .join(" ")
     .toLowerCase()
@@ -33,13 +33,32 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
   // The basket's table decides the prices, once there is one.
   const table = basket?.pub?.ref === view.pub && basket.table != null ? basket.table : (view.table ?? null);
 
+  const words = search.toLowerCase().replace(/[’'`]/g, "").split(/\s+/).filter(Boolean);
+  const [rest, setRest] = useState<Section[] | null>(null);
   useEffect(() => {
     setError(null);
-    gql<{ pub: Loaded | null }>(Q.MENU, { ref: view.pub, table }).then(
+    setRest(null);
+    const wanted = view.kinds?.length ? view.kinds : Q.DRINKS;
+    gql<{ pub: Loaded | null }>(Q.MENU, { ref: view.pub, table, kinds: wanted }).then(
       (d) => (d.pub ? setData(d.pub) : setError("No such pub.")),
       (e) => setError(String(e.message ?? e)),
     );
-  }, [view.pub, table]);
+  }, [view.pub, table, view.kinds?.join()]);
+
+  // Food and the rest, half a menu, only once someone wants it.
+  const loadRest = () => {
+    if (rest || !data) return;
+    const loaded = new Set(data.menu.sections.map((s) => s.kind));
+    const missing = data.menu.all.map((s) => s.kind).filter((k) => !loaded.has(k));
+    if (!missing.length) return setRest([]);
+    gql<{ pub: { menu: { sections: Section[] } } }>(Q.MENU_KINDS, { ref: view.pub, table, kinds: missing }).then(
+      (d) => setRest(d.pub.menu.sections),
+      (e) => setError(String(e.message ?? e)),
+    );
+  };
+  useEffect(() => {
+    if (showFood || words.length) loadRest();
+  }, [showFood, words.length > 0, data]);
 
   useEffect(() => {
     const onMode = () => setFullscreen(app.getHostContext()?.displayMode === "fullscreen");
@@ -47,15 +66,19 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
     return () => app.removeEventListener("hostcontextchanged", onMode);
   }, []);
 
-  const words = search.toLowerCase().replace(/[’'`]/g, "").split(/\s+/).filter(Boolean);
   const sections: Section[] = useMemo(() => {
     if (!data) return [];
-    return data.menu.sections
+    const loaded = [...data.menu.sections, ...(rest ?? [])];
+    // Kinds not loaded yet keep their place, as a tab and a "show" button.
+    const all = data.menu.all.map(
+      (a) => loaded.find((s) => s.kind === a.kind) ?? { ...a, products: [] as Product[], pending: true },
+    );
+    return all
       .filter((s) => !afOnly || s.kind === "ALCOHOL_FREE" || s.kind === "SOFT" || s.kind === "HOT")
       .filter((s) => !view.kinds?.length || view.kinds.includes(s.kind))
       .map((s) => ({ ...s, products: words.length ? s.products.filter((p) => matches(p, words)) : s.products }))
-      .filter((s) => s.products.length);
-  }, [data, words.join(" "), afOnly, view.kinds?.join()]);
+      .filter((s) => s.products.length || ("pending" in s && !words.length));
+  }, [data, rest, words.join(" "), afOnly, view.kinds?.join()]);
 
   const guests = useMemo(
     () => data?.menu.sections.find((s) => s.kind === "CASK_ALE")?.products.filter((p) => p.guest) ?? [],
@@ -90,13 +113,18 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
   if (!data) return <Pouring label="Reading the menu…" />;
 
   const jump = (kind: Kind) => {
-    if (kind === "FOOD") setShowFood(true);
+    if (sections.find((s) => s.kind === kind && "pending" in s)) setShowFood(true);
     requestAnimationFrame(() => document.getElementById(`k-${kind}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
 
   const order = (p: Product, portion: Portion) => void add(view.pub, p, portion);
 
-  if (compact) {
+  // On a phone the host clips an inline app and gives vertical swipes to the chat, so a scrolling menu belongs in
+  // fullscreen; inline it's the short card.
+  const phoneInline = app.getHostContext()?.platform === "mobile" && !fullscreen;
+  if (compact || phoneInline) {
+    const whole = () =>
+      canFullscreen() ? void setDisplayMode("fullscreen").then(() => go({ ...view })) : go({ ...view });
     const shortlist = words.length ? sections.flatMap((s) => s.products).slice(0, 6) : guests.slice(0, 4);
     return (
       <div class="menu is-compact">
@@ -107,9 +135,10 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
             <ProductRow key={p.id} p={p} onAdd={order} busy={busy} count={inBasket.get(p.id)} lit={highlight.has(p.id)} />
           ))}
         </ul>
-        <button class="link-btn" onClick={() => go({ ...view })}>
+        <button class="link-btn" onClick={whole}>
           See the whole menu · {data.menu.totalCount} things
         </button>
+        <BasketBar />
       </div>
     );
   }
@@ -147,7 +176,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
         {sections.map((s) => (
           <button key={s.kind} class={active === s.kind ? "on" : ""} aria-current={active === s.kind} onClick={() => jump(s.kind)}>
             {s.label}
-            <span class="count">{s.products.length}</span>
+            <span class="count">{"pending" in s ? s.count : s.products.length}</span>
           </button>
         ))}
       </nav>
@@ -177,7 +206,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
           </section>
         )}
         {sections.map((s) => {
-          const folded = s.kind === "FOOD" && !showFood && !words.length;
+          const folded = "pending" in s || (s.kind === "FOOD" && !showFood && !words.length);
           return (
             <section key={s.kind} id={`k-${s.kind}`} data-kind={s.kind} class={`menu-section kind-${s.kind}`}>
               <h3>
@@ -186,7 +215,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
               </h3>
               {folded ? (
                 <button class="link-btn" onClick={() => setShowFood(true)}>
-                  Show {s.products.length} food and snacks
+                  {showFood ? "Fetching…" : `Show ${s.count} ${s.kind === "FOOD" ? "food and snacks" : "more"}`}
                 </button>
               ) : (
                 <ul class="rows">
@@ -251,7 +280,7 @@ function Portions({ p, onAdd, busy }: { p: Product; onAdd: (p: Product, portion:
     <span class="portions">
       {p.portions.map((portion) => (
         <button
-          key={portion.label}
+          key={portion.name}
           class={`portion ${portion.isDefault ? "default" : ""}`}
           disabled={!p.orderable || busy}
           onClick={() => onAdd(p, portion)}
@@ -311,7 +340,7 @@ function GuestCard({ p, i, ...rest }: RowProps & { i: number }) {
         <div>
           <div class="brewery">{p.brewery}</div>
           <div class="guest-name">{p.shortName}</div>
-          <div class="muted small">{p.style ?? p.colour?.label}</div>
+          <div class="muted small">{p.style}</div>
         </div>
         {rest.count ? <span class="in-basket">×{rest.count}</span> : null}
       </div>

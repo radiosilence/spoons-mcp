@@ -97,7 +97,7 @@ async function change(op: string, variables: Record<string, unknown>, said: (b: 
 }
 
 export async function add(pub: number, product: Product, portion: Portion) {
-  const ok = await change(Q.ADD, { pub, product: product.id, portion: portion.label }, () =>
+  const ok = await change(Q.ADD, { pub, product: product.id, portion: portion.name }, () =>
     `added 1 × ${product.name} (${portion.name}).`,
   );
   if (ok) toast(`${product.shortName} · ${portion.name} added`);

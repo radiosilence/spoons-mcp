@@ -13,7 +13,12 @@ import {
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
 
-export const app = new App({ name: "spoons", version: "1.0.0" }, {}, { autoResize: true });
+// The spec has a View declare the display modes it can take before asking for one: the menu goes fullscreen.
+export const app = new App(
+  { name: "spoons", version: "1.0.0" },
+  { availableDisplayModes: ["inline", "fullscreen"] },
+  { autoResize: true },
+);
 
 /** The conversation's basket, so the app's own calls reach it even on an MCP session of their own. */
 let session: string | null = null;
@@ -34,18 +39,21 @@ export async function gql<T>(query: string, variables: Record<string, unknown> =
       ui: { view: "NONE", ...(session ? { session } : {}) },
     },
   });
-  let body = result.structuredContent as { data?: T; errors?: { message: string }[] } | undefined;
-  if (!body) {
-    const text = result.content?.find((c) => c.type === "text");
-    if (text && "text" in text) {
-      try {
-        body = JSON.parse(text.text);
-      } catch {
-        throw new GraphqlError(text.text);
-      }
+  // The answer is the text (compact JSON for the app's own calls); structured content only carries the view.
+  const text = result.content?.find((c) => c.type === "text");
+  const raw = text && "text" in text ? text.text : null;
+  if (result.isError) throw new GraphqlError(raw ?? "The call failed.");
+  let body: { data?: T; errors?: { message: string }[] } | undefined;
+  if (raw) {
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      throw new GraphqlError(raw);
     }
+  } else {
+    body = result.structuredContent as typeof body;
   }
-  if (result.isError || !body) throw new GraphqlError("The server didn’t answer.");
+  if (!body) throw new GraphqlError("The server didn’t answer.");
   // A field that failed is null and the rest still stands, as GraphQL means it; only no data at all is a failure.
   if (body.data == null) {
     throw new GraphqlError(body.errors?.map((e) => e.message).join("; ") || "No answer.");
