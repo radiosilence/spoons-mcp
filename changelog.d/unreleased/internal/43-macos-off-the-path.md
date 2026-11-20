@@ -1,0 +1,1 @@
+- **The Mac build no longer holds anything up.** It builds in its own job that neither Checks, the image nor the GitHub release waits on, and is attached to the release once built.
