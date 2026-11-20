@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- **The order summary sits above Confirm payment on a phone too.** The compact quote card shows its lines, the first five of a long round, rather than only the total and table.
+
 ## 0.5.1
 
 ### Fixed
