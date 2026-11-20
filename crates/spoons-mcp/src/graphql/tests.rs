@@ -53,7 +53,10 @@ impl Respond for Till {
             .iter()
             .map(|line| {
                 let quantity = line["quantity"].as_u64().unwrap();
-                json!({ "id": line["product"]["id"], "quantity": quantity,
+                // As the real till does, a guest ale's long id comes back cut to its first eleven digits.
+                let id = line["product"]["id"].to_string();
+                let id: u64 = id[..id.len().min(11)].parse().unwrap();
+                json!({ "id": id, "quantity": quantity,
                         "price": { "value": 3.70 * quantity as f64 } })
             })
             .collect();
@@ -1389,4 +1392,85 @@ async fn the_sheet_adds_by_ids_with_a_drink() {
     let lines = &data["basketAdd"]["basket"]["lines"];
     assert_eq!(lines[0]["options"], json!(["Mushy Peas"]), "{data}");
     assert_eq!(lines[1]["name"], "Guinness", "{data}");
+}
+
+/// The till names a guest ale by a cut-down id (`1000000111112124` comes back as `10000001111`); its line still
+/// carries the till's price.
+#[tokio::test]
+async fn every_quote_line_carries_its_price() {
+    let h = harness().await;
+    let data = h
+        .run(
+            "mutation { quote(pub: 254, table: 4, items: [{productId: \"1000000111112124\", portion: \"Pint\"}, \
+               {productId: \"1000000111112124\", portion: \"Half pint\"}]) \
+               { success error quote { table total { amount } lines { portion tillPrice { amount } } } } }",
+            json!({}),
+        )
+        .await;
+    let quote = &data["quote"]["quote"];
+    assert_eq!(data["quote"]["success"], true, "{data}");
+    assert_eq!(quote["table"], 4);
+    for line in quote["lines"].as_array().unwrap() {
+        assert_eq!(line["tillPrice"]["amount"], 3.7, "{data}");
+    }
+}
+
+/// Once a table is given, later orders in the conversation go to it without being asked again; another pub, or no
+/// table ever given, still needs the user's word.
+#[tokio::test]
+async fn the_table_sticks_for_the_conversation() {
+    let h = harness().await;
+    let none = h
+        .run(
+            "mutation { quote(pub: 254, items: [{productId: \"1000000111112124\", portion: \"Pint\"}]) { success error } }",
+            json!({}),
+        )
+        .await;
+    assert_eq!(none["quote"]["success"], false);
+    assert!(
+        none["quote"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("no table"),
+        "{none}"
+    );
+
+    let first = h
+        .run(
+            "mutation { quote(pub: 254, table: 4, items: [{productId: \"1000000111112124\", portion: \"Pint\"}]) { success } }",
+            json!({}),
+        )
+        .await;
+    assert_eq!(first["quote"]["success"], true, "{first}");
+    let again = h
+        .run(
+            "mutation { quote(items: [{productId: \"1000000111112124\", portion: \"Half pint\"}]) \
+               { success error quote { table summary } } }",
+            json!({}),
+        )
+        .await;
+    assert_eq!(again["quote"]["success"], true, "{again}");
+    assert_eq!(again["quote"]["quote"]["table"], 4);
+    assert!(
+        again["quote"]["quote"]["summary"]
+            .as_str()
+            .unwrap()
+            .contains("to table 4"),
+        "{again}"
+    );
+
+    let elsewhere = h
+        .run(
+            "mutation { quote(pub: 1006, items: [{productId: \"1000000111112124\", portion: \"Pint\"}]) { success error } }",
+            json!({}),
+        )
+        .await;
+    assert_eq!(elsewhere["quote"]["success"], false, "{elsewhere}");
+    assert!(
+        elsewhere["quote"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("no table"),
+        "{elsewhere}"
+    );
 }

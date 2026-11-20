@@ -48,8 +48,10 @@ Ordering: find the pub (`pubs(query:)`, or `pubs(near:)` nearest first), read wh
 then `quote`, which prices it at the till and changes nothing. Show the user the lines, table and total. \"4 pints \
 of Abbot to table 4\" is a search, one `basketAdd(pub:, table: 4, productId:, portion: \"Pint\", quantity: 4)` and a \
 `quote`.\n\n\
-Money: `pay` is PREVIEW then CONFIRM. Show the user the preview and CONFIRM only on their explicit yes, never on \
-your own; the same goes for `cancelOrder` and `sendDuplicate`. With a saved card CONFIRM pays and reports; otherwise \
+Money: `pay` is PREVIEW then CONFIRM, and CONFIRM needs the user's say-so, never your own: a yes to the quote, \
+or \"and pay\" or \"pay now\" with the order itself, which is that yes given up front, so quote, preview and \
+confirm in one go without asking again, and still show the lines, table and total in your reply. `cancelOrder` \
+and `sendDuplicate` always wait for an explicit yes to the preview. With a saved card CONFIRM pays and reports; otherwise \
 it returns a payment page link to give the user. The bank may ask them to approve it in their banking app: follow \
 with `order(quoteId:, waitSecs: 30)`. If `pay` asks a question (a repeat of a recent order to the same table), ask \
 the user and do nothing else until they answer.\n\n\
@@ -58,15 +60,20 @@ user's words as `choices` (\"chips\", \"mushy peas\", \"lemonade\", \"neat\"); i
 things, the error lists the options, so ask the user rather than picking for them. A meal whose `deals` include a \
 drink comes with one from `includedDrinks`: offer it, and pass the user's pick as `includeDrink`; the till takes \
 the deal off, shown as the quote's `savings`. Multi-buys (\"Any 2 for £6.60\") apply by themselves.\n\n\
-Never guess a table: a drink is carried to whichever table is given. Ask when the user hasn't said one in this \
-conversation, and check again if they may have moved. A garden or another part of the pub can have its own menu and \
-prices, so read the menu for the table.\n\n\
+Tables: a drink is carried to whichever table is given, so never make one up. Ask only when no table has been \
+given in this conversation at all. Once the user has given one, it sticks: the server keeps the pub and table \
+(`setTable`, `basketAdd(table:)` or a quote's), and `quote` uses them when `table` is left out, so reuse them for \
+every later order without asking. Check the table again only on a clear sign it has changed: the user says they've \
+moved or names another table, the order is for another pub, or hours have passed (`now` against the last quote's \
+`createdAt`) so it's plausibly a new visit. People order by voice in a noisy pub: snatches of other conversations \
+(\"I've got a different number\") are noise, not a move, so don't stop to ask about them. A garden or another part \
+of the pub can have its own menu and prices, so read the menu for the table.\n\n\
 Search forgives what dictation mangles: pass what the user said (\"broccoli barge\", \"sumo\", \"a mocktail\", \
 \"alcohol free lager\") rather than guessing names; results come best first, and `closeMatches` says when none \
 had every word, so say they're the nearest. Page long lists with `first` and `after`.\n\n\
 The basket belongs to this conversation, and the server keeps no history between conversations, so take the pub, \
 table and usual order from this one. For \"another\" or \"same again\", `basketFromQuote` with the last quote \
-(`quotes` lists this conversation's), check the table still stands, then `quote`.\n\n\
+(`quotes` lists this conversation's), then `quote`, to the same table.\n\n\
 The till's price is what's charged; when it differs from the menu (`differsFromMenu`), say so. A pub's menu is read \
 once per area per day, after which searching and filtering it are free; field descriptions say what the rest costs. \
 `now` gives the time in London for free.\n\n\
@@ -256,7 +263,8 @@ impl Spoons {
                        menu (real and guest ales, lager, cider, wine, spirits, alcohol-free, soft and hot drinks, \
                        food) with prices for a table, keep a basket, price it at the till, and pay, cancel or track \
                        an order. Paying, cancelling and sending a held repeat order are PREVIEW then CONFIRM, and \
-                       CONFIRM only ever follows the user's explicit yes. Get the schema from `spoons_schema` \
+                       CONFIRM only ever follows the user's own say-so (for paying, \"and pay\" with the order \
+                       counts). The pub and table stick for the conversation once given. Get the schema from `spoons_schema` \
                        first. Variables are a JSON string.",
         annotations(destructive_hint = true, open_world_hint = true),
         meta = crate::ui::tool_meta()

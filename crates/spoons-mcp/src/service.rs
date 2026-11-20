@@ -503,13 +503,7 @@ impl Service {
             .await
             .map_err(fail)
             .map_err(forget)?;
-        if validation.items.len() == lines.len() {
-            for (line, priced) in lines.iter_mut().zip(&validation.items) {
-                if priced.id == line.product_id {
-                    line.price = Some(priced.price.value);
-                }
-            }
-        }
+        price_lines(&mut lines, &validation.items);
         let order = Order {
             quote_id: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
             created_at: now(),
@@ -975,5 +969,97 @@ impl Service {
             .await
             .map_err(fail)?;
         Ok((order, status))
+    }
+}
+
+/// Puts the till's price on each line. The till answers in the basket's order, but not always with the product's
+/// own id: a guest ale listed as `1000000111111512` comes back as `10000001111`. So lines take, in turn across the
+/// whole basket, the till's line with their exact id, then one whose id is their own cut to eleven digits or more,
+/// then the one in their place when the till answered every line; a line with no match keeps no price.
+fn price_lines(lines: &mut [Line], priced: &[spoons_api_client::ValidatedLine]) {
+    let every_line = priced.len() == lines.len();
+    let cut_from = |theirs: u64, own: u64| {
+        let (theirs, own) = (theirs.to_string(), own.to_string());
+        theirs.len() >= 11 && theirs.len() < own.len() && own.starts_with(&theirs)
+    };
+    let mut taken = vec![false; priced.len()];
+    for pass in 0..3 {
+        for (at, line) in lines.iter_mut().enumerate() {
+            if line.price.is_some() {
+                continue;
+            }
+            let found = match pass {
+                0 => (0..priced.len()).find(|&i| !taken[i] && priced[i].id == line.product_id),
+                1 => (0..priced.len())
+                    .find(|&i| !taken[i] && cut_from(priced[i].id, line.product_id)),
+                _ => (every_line && !taken[at]).then_some(at),
+            };
+            if let Some(i) = found {
+                taken[i] = true;
+                line.price = Some(priced[i].price.value);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn line(id: u64) -> Line {
+        serde_json::from_value(json!({ "product_id": id, "name": "x", "portion": "Pint", "quantity": 1, "price": null }))
+            .unwrap()
+    }
+
+    fn till(lines: &[(u64, f64)]) -> Vec<spoons_api_client::ValidatedLine> {
+        lines
+            .iter()
+            .map(|(id, price)| {
+                serde_json::from_value(
+                    json!({ "id": id, "quantity": 1, "price": { "value": price } }),
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
+    fn prices(lines: &[Line]) -> Vec<Option<f64>> {
+        lines.iter().map(|l| l.price).collect()
+    }
+
+    #[test]
+    fn a_cut_down_id_finds_its_line() {
+        let mut lines = [line(1000000111112124), line(10000000292)];
+        price_lines(
+            &mut lines,
+            &till(&[(10000001111, 3.41), (10000000292, 4.2)]),
+        );
+        assert_eq!(prices(&lines), [Some(3.41), Some(4.2)]);
+    }
+
+    #[test]
+    fn exact_ids_come_first_whatever_the_order() {
+        let mut lines = [line(10000000292), line(10000000300)];
+        price_lines(&mut lines, &till(&[(10000000300, 2.0), (10000000292, 4.2)]));
+        assert_eq!(prices(&lines), [Some(4.2), Some(2.0)]);
+    }
+
+    #[test]
+    fn a_short_id_is_no_ones_cut_down_id() {
+        // The till leaves the ale out: its line has no price, and the other keeps its own.
+        let mut lines = [line(1000000111112124), line(1000)];
+        price_lines(&mut lines, &till(&[(1000, 1.5)]));
+        assert_eq!(prices(&lines), [None, Some(1.5)]);
+    }
+
+    #[test]
+    fn two_sizes_of_one_ale_take_their_places() {
+        let mut lines = [line(1000000111111512), line(1000000111111512)];
+        price_lines(
+            &mut lines,
+            &till(&[(10000001111, 3.41), (10000001111, 1.71)]),
+        );
+        assert_eq!(prices(&lines), [Some(3.41), Some(1.71)]);
     }
 }

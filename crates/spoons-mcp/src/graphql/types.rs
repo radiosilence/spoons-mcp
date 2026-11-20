@@ -1230,7 +1230,7 @@ pub fn meaning(status: OrderStatus, live: Option<&PaymentStatus>) -> String {
     }
     match status {
         OrderStatus::NotStarted => {
-            "Quoted, not paid. Show the user the lines and total; on their yes, preview and confirm `pay`."
+            "Quoted, not paid. Show the user the lines, table and total; on their yes (or if they already said to pay), preview and confirm `pay`."
         }
         OrderStatus::Preparing => "A payment was being started. Query `order` again.",
         OrderStatus::Unconfirmed => {
@@ -1476,7 +1476,7 @@ impl Order {
 pub enum ConfirmAction {
     /// Show what would happen and return a `confirmationToken`. Changes nothing.
     Preview,
-    /// Do it, with the token from PREVIEW and the same arguments. Only on the user's explicit yes.
+    /// Do it, with the token from PREVIEW and the same arguments. Only on the user's own say-so.
     Confirm,
 }
 
