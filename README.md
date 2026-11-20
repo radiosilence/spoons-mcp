@@ -140,8 +140,11 @@ API needs to cancel a payment it started. The server is careful about the cases 
   table, before payment (`pay` asks) or after it (the order is held, and `sendDuplicate` or `cancelOrder` settles
   it).
 
-Products that need a choice made, such as a spirit's mixer or a meal's side, can't be quoted yet; the menu says
-which (`orderable`, `whyNot`).
+Products that ask a question (a spirit's mixer, a meal's side or peas) list it as `optionGroups`, and are ordered with
+`choices` in the user's words or `options` by id; the server checks every required group is answered before the till
+is asked, since the till only says the product is "unavailable" (Z216) when one isn't. A meal that "Includes a drink"
+takes one from `includedDrinks` as `includeDrink`: it goes to the till as its own line, under the deal's category, as
+the app sends it, and the till takes the deal off (the quote's `savings`). Multi-buys are applied by the till too.
 
 ## Things worth knowing about the API
 

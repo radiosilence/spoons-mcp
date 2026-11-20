@@ -10,7 +10,7 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use spoons_api_client::{Ale, BasketLine, Item, Menu, Product};
+use spoons_api_client::{Ale, Item, Menu, Product};
 
 /// What a product is, as people ask for it.
 #[derive(async_graphql::Enum, Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize)]
@@ -163,6 +163,23 @@ impl Entry {
 pub struct Catalogue {
     pub entries: Vec<Entry>,
     pub coming_soon: Vec<Ale>,
+    /// Deal categories as the menus list them, for ordering through a deal: a meal's included drink is the drink
+    /// as listed under "Includes a drink", which is how the till knows to take the deal off.
+    pub deals: Vec<DealListing>,
+}
+
+/// A deal's category and what it lists.
+#[derive(Clone, Debug)]
+pub struct DealListing {
+    pub category_id: u64,
+    pub name: String,
+    pub products: Vec<Product>,
+}
+
+impl DealListing {
+    pub fn includes_drink(&self) -> bool {
+        fold(&self.name).contains("includes a drink")
+    }
 }
 
 impl Catalogue {
@@ -174,10 +191,26 @@ impl Catalogue {
         for menu in menus {
             for category in menu.categories.iter().filter(|c| !c.hidden) {
                 let deal = is_deal(&category.name);
+                if deal && !catalogue.deals.iter().any(|d| d.category_id == category.id) {
+                    catalogue.deals.push(DealListing {
+                        category_id: category.id,
+                        name: category.name.trim().to_owned(),
+                        products: Vec::new(),
+                    });
+                }
                 for group in &category.item_groups {
                     for item in &group.items {
                         match item {
                             Item::Product(product) => {
+                                if deal
+                                    && let Some(listing) = catalogue
+                                        .deals
+                                        .iter_mut()
+                                        .find(|d| d.category_id == category.id)
+                                    && !listing.products.iter().any(|p| p.id == product.id)
+                                {
+                                    listing.products.push((**product).clone());
+                                }
                                 if let Some(existing) = catalogue
                                     .entries
                                     .iter_mut()
@@ -227,6 +260,15 @@ impl Catalogue {
             }
         }
         catalogue
+    }
+
+    /// The deal category a meal's included drink comes from, if the meal has one.
+    pub fn included_drinks(&self, meal: &Product) -> Option<&DealListing> {
+        meal.options.linked.iter().find_map(|link| {
+            self.deals
+                .iter()
+                .find(|d| d.category_id == link.category_id && d.includes_drink())
+        })
     }
 
     pub fn get(&self, product_id: u64) -> Option<&Entry> {
@@ -312,9 +354,14 @@ fn entry(
         &product.name,
     );
     let sizes = sizes(product, abv);
-    let why_not = BasketLine::new(0, product, None, 1)
-        .err()
-        .map(|error| error.to_string());
+    // A choice to make (a mixer, a side) doesn't stop an order: only being out, or having no size to order.
+    let why_not = if product.is_out_of_stock {
+        Some(format!("{} is out of stock", product.name))
+    } else {
+        spoons_api_client::find_portion(product, None)
+            .err()
+            .map(|error| error.to_string())
+    };
     Entry {
         product: product.clone(),
         category_id,

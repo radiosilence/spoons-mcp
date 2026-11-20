@@ -27,6 +27,9 @@ pub struct Order {
     pub table: u32,
     pub lines: Vec<Line>,
     pub total: f64,
+    /// What deals took off, when they did.
+    #[serde(default)]
+    pub savings: Option<f64>,
     pub currency: String,
     pub token: String,
     pub payment: Payment,
@@ -43,6 +46,18 @@ pub struct Line {
     /// One of the size as the menu priced it, for showing where the till differs.
     #[serde(default)]
     pub menu_price: Option<f64>,
+    /// The options chosen: "Peas", "Chips".
+    #[serde(default)]
+    pub choices: Vec<String>,
+    /// The deal it's ordered through: "included with Steak & ale pudding".
+    #[serde(default)]
+    pub deal: Option<String>,
+    /// The same as (group id, option id), for ordering it again.
+    #[serde(default)]
+    pub picks: Vec<(u64, u64)>,
+    /// The deal category it's ordered through, for a meal's included drink.
+    #[serde(default)]
+    pub listing: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -198,6 +213,7 @@ mod tests {
             table: 17,
             lines: vec![],
             total: 4.22,
+            savings: None,
             currency: "GBP".into(),
             token: "t".into(),
             payment,

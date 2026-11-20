@@ -266,6 +266,37 @@ button:disabled { cursor: default; opacity: 0.5; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions .primary { flex: 1; min-width: 160px; }
 
+/* Option sheet */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 20; background: rgb(20 12 6 / 0.45); display: flex; align-items: flex-end; justify-content: center; animation: fade 0.2s ease-out both; }
+.sheet {
+  width: min(560px, 100%); max-height: 88%; overflow-y: auto; overscroll-behavior: contain; outline: none;
+  background: var(--bg); color: var(--text); border-radius: 20px 20px 0 0; box-shadow: 0 -12px 40px -12px rgb(20 12 6 / 0.5);
+  padding: 8px 16px calc(16px + var(--safe-bottom)); animation: slide 0.25s ease-out both;
+}
+.sheet::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 8px; }
+.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sheet-head h3 { margin: 4px 0 0; font: 600 19px/1.2 var(--display); }
+.sheet-head p { margin: 2px 0 0; }
+.choice-group { border: 0; padding: 0; margin: 14px 0 0; }
+.choice-group legend { font-weight: 650; font-size: 15px; margin-bottom: 8px; display: flex; gap: 8px; align-items: center; padding: 0; }
+.choice-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice {
+  min-height: var(--tap); padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg);
+  display: inline-flex; align-items: center; gap: 6px; transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.choice.on { border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, var(--bg)); font-weight: 650; }
+.choice:active { transform: scale(0.97); }
+.choice.drink .glass { margin: -4px 0; }
+.tag.done { color: var(--ok); border-color: var(--ok); }
+.tag.deal { color: var(--brass); border-color: color-mix(in srgb, var(--brass) 50%, var(--line)); background: var(--brass-soft); }
+.small-search { min-height: 38px; margin-bottom: 8px; }
+.sheet-foot { position: sticky; bottom: calc(-16px - var(--safe-bottom)); background: var(--bg); padding: 10px 0 0; margin-top: 8px; }
+.line-qty { min-width: var(--tap); text-align: center; font-weight: 700; color: var(--text2); }
+.saved { margin: 6px 0 0; color: var(--ok); font-weight: 650; display: flex; gap: 4px; align-items: center; }
+.q-name .tag.deal { margin-left: 6px; font-size: 11px; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes slide { from { transform: translateY(24px); opacity: 0; } }
+
 /* Quote and order */
 .quote {
   padding: 16px; border-radius: calc(var(--radius) + 4px); border: 1px solid var(--line);
@@ -321,3 +352,6 @@ button:disabled { cursor: default; opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+/* While a sheet is open its button sits where a toast would; the toast moves to the top. */
+body:has(.sheet-backdrop) .toast { top: 12px; bottom: auto; }
+.sheet-foot .primary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

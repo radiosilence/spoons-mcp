@@ -461,6 +461,25 @@ fn field_score(term: &Term, field: &str) -> f32 {
     }
 }
 
+/// How well every word of `query` is found in `text`, both normalised: 0 when any word is missing, else the mean
+/// of each word's best match. For short labels such as an option's name.
+pub fn text_score(query: &str, text: &str) -> f32 {
+    let words: Vec<&str> = text.split(' ').collect();
+    let query: Vec<&str> = query.split(' ').filter(|w| !w.is_empty()).collect();
+    if query.is_empty() {
+        return 0.0;
+    }
+    let mut total = 0.0;
+    for q in &query {
+        let best = words.iter().map(|w| word_score(q, w)).fold(0.0, f32::max);
+        if best == 0.0 {
+            return 0.0;
+        }
+        total += best;
+    }
+    total / query.len() as f32
+}
+
 /// Text to search, with its weight.
 pub struct Field {
     pub text: String,

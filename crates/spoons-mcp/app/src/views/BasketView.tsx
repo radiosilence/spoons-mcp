@@ -76,12 +76,17 @@ export function BasketView({ compact }: { compact: boolean }) {
               <div class="line-body">
                 <div class="line-name">{l.name}</div>
                 <div class="muted small">
-                  {l.portion.replace(/\s*\(.*\)/, "")}
+                  {[l.portion.replace(/\s*\(.*\)/, ""), ...l.options].filter((x) => x && x !== "Standard").join(", ")}
                   {l.unitPrice ? ` · ${l.unitPrice.formatted} each` : ""}
                 </div>
+                {l.includedWith && <div class="tag deal">With the meal deal</div>}
                 {l.note && <div class="why-not">{l.note}</div>}
               </div>
-              <Stepper value={l.quantity} label={l.name} busy={busy} onChange={(q) => void setQuantity(l.id, l.name, q)} />
+              {l.includedWith ? (
+                <span class="line-qty">×{l.quantity}</span>
+              ) : (
+                <Stepper value={l.quantity} label={l.name} busy={busy} onChange={(q) => void setQuantity(l.id, l.name, q)} />
+              )}
               <span class="line-total">{l.lineTotal?.formatted ?? "—"}</span>
             </li>
           ))}

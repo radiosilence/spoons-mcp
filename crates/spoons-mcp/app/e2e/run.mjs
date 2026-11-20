@@ -76,7 +76,8 @@ async function call(page, query, extra = {}) {
   await page.fill("textarea", JSON.stringify({ query, ...extra }));
   await page.click("button[type=submit]");
   await page.waitForFunction((n) => document.querySelectorAll("iframe").length > n, before);
-  const outer = page.locator("iframe").last();
+  // Pinned by index: `.last()` would follow whichever app came last.
+  const outer = page.locator("iframe").nth((await page.locator("iframe").count()) - 1);
   let app;
   for (let i = 0; i < 150 && !app; i++) {
     app = page.frames().find((f) => !seen.has(f) && f.parentFrame()?.url().includes("sandbox.html"));
@@ -211,6 +212,30 @@ async function lastResultText(page) {
   await menu.app.fill(".search input", "mocktail");
   await menu.app.waitForSelector("text=Raspberry Refresher", { timeout: 15000 });
   check(true, "searching \"mocktail\" in the app finds the 0% cocktails");
+  await menu.app.fill(".search input", "");
+
+  // A product that asks a question opens a sheet: fish and chips asks about peas, and comes with a drink.
+  await menu.app.fill(".search input", "fish and chips");
+  await menu.app.waitForSelector("text=Small freshly battered fish and chips", { timeout: 15000 });
+  await menu.app.click("#p-10000162183 .portion");
+  await menu.app.waitForSelector(".sheet .choice-group", { timeout: 15000 });
+  await sleep(400);
+  await menu.outer?.screenshot?.({ path: join(out, "sheet-380-light.png") });
+  // Quoted: an exact match, since the question "Peas, mushy peas or beans?" also contains the words.
+  await menu.app.click('.sheet .choice >> text="Mushy Peas"');
+  await menu.app.click('.sheet .choice.drink >> text="Guinness"');
+  await sleep(300);
+  await menu.outer.screenshot({ path: join(out, "sheet-picked-380-light.png"), animations: "disabled" });
+  await menu.app.click(".sheet-foot .primary");
+  // Only an app on screen watches the basket; the menu has pushed the first one out of view.
+  await first.outer.scrollIntoViewIfNeeded();
+  await first.app.waitForFunction(
+    () => [...document.querySelectorAll(".line")].some((l) => l.textContent.includes("Mushy Peas"))
+      && [...document.querySelectorAll(".line")].some((l) => l.textContent.includes("With the meal deal")),
+    null,
+    { timeout: 25000 },
+  );
+  check(true, "the options sheet adds fish and chips with mushy peas and a Guinness from the meal deal");
   await menu.app.fill(".search input", "");
 
   // The app quotes and asks in the chat; it has no way to confirm.

@@ -53,6 +53,11 @@ your own; the same goes for `cancelOrder` and `sendDuplicate`. With a saved card
 it returns a payment page link to give the user. The bank may ask them to approve it in their banking app: follow \
 with `order(quoteId:, waitSecs: 30)`. If `pay` asks a question (a repeat of a recent order to the same table), ask \
 the user and do nothing else until they answer.\n\n\
+Some products ask a question first (`optionGroups`): a spirit's mixer, a meal's side or peas. Pass the \
+user's words as `choices` (\"chips\", \"mushy peas\", \"lemonade\", \"neat\"); if one's missing or could be two \
+things, the error lists the options, so ask the user rather than picking for them. A meal whose `deals` include a \
+drink comes with one from `includedDrinks`: offer it, and pass the user's pick as `includeDrink`; the till takes \
+the deal off, shown as the quote's `savings`. Multi-buys (\"Any 2 for £6.60\") apply by themselves.\n\n\
 Never guess a table: a drink is carried to whichever table is given. Ask when the user hasn't said one in this \
 conversation, and check again if they may have moved. A garden or another part of the pub can have its own menu and \
 prices, so read the menu for the table.\n\n\
