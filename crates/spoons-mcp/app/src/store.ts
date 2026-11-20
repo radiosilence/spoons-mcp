@@ -172,10 +172,16 @@ export async function watchBasket(signal: AbortSignal) {
       await new Promise((r) => setTimeout(r, 1500));
       continue;
     }
+    const asked = Date.now();
+    const had = state.basket?.version ?? 0;
     try {
-      const { basket } = await gql<{ basket: Basket }>(Q.BASKET_WAIT, { v: state.basket?.version ?? 0 });
-      newBasket(basket);
+      const { basket } = await gql<{ basket: Basket }>(Q.BASKET_WAIT, { v: had });
+      // A version behind ours means the server started afresh (a new release, a lost session): take its word.
+      if (basket.version < had) set({ basket });
+      else newBasket(basket);
       failures = 0;
+      // Answered at once without a change: don't spin.
+      if (basket.version === had && Date.now() - asked < 1000) await new Promise((r) => setTimeout(r, 3000));
     } catch {
       failures++;
       await new Promise((r) => setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)));

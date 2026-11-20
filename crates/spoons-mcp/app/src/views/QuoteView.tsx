@@ -5,7 +5,9 @@ import { askToPay } from "../store";
 import type { Order, OrderStatus, PayLike, Quote } from "../types";
 import { Icon, Pouring } from "../ui";
 
-const LIVE: OrderStatus[] = ["PREPARING", "PENDING", "IN_PROGRESS", "PAID"];
+/** States the payment moves on from by itself. PREPARING isn't one: it has no payment to watch yet, and only stays
+ * if a server died mid-request, so polling it would spin. */
+const LIVE: OrderStatus[] = ["PENDING", "IN_PROGRESS", "PAID"];
 
 /** A quote, and once paying starts, its order. Never a pay button: that's the conversation's. */
 export function QuoteView({
@@ -38,13 +40,18 @@ export function QuoteView({
     let stop = false;
     (async () => {
       let wait = 0;
+      let last: OrderStatus | null = null;
       while (!stop) {
+        const asked = Date.now();
         try {
           const { order } = await gql<{ order: Order }>(Q.ORDER, { id: quoteId, wait });
           if (stop) return;
           setOrder(order);
           setQuote(order.quote);
           if (!LIVE.includes(order.status)) return;
+          // The server holds the call until something changes; if it answered at once with nothing new, pause.
+          if (order.status === last && Date.now() - asked < 2000) await new Promise((r) => setTimeout(r, 5000));
+          last = order.status;
           wait = 20;
         } catch {
           await new Promise((r) => setTimeout(r, 5000));
