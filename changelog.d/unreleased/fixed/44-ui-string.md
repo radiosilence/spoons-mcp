@@ -1,0 +1,1 @@
+- **App hints as a string no longer fail the call.** `ui` is read whether it comes as an object or, as models often send it, a JSON string; hints that can't be read are dropped instead of failing the request.
