@@ -1,0 +1,1 @@
+- **Taps in the app go to the pub and table you're at.** Adding from the app's menu sends the table it shows, and a menu Claude opens without naming a table takes the one set in the chat, so a tap no longer lands in a basket with no table.

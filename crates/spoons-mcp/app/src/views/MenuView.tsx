@@ -133,7 +133,7 @@ export function MenuView({ view, hints, compact }: { view: MenuViewT; hints: Hin
   // Something that asks a question first (a mixer, a side), or a meal that comes with a drink, opens the sheet.
   const order = (p: Product, portion: Portion) => {
     if (p.needsChoices || p.deals.some((d) => d.kind === "INCLUDES_DRINK")) setAsking({ product: p, portion, answers: { picked: {}, drink: null } });
-    else void add(view.pub, p, portion);
+    else void add(view.pub, table, p, portion);
   };
   const sheet = asking && (
     <OptionSheet

@@ -104,13 +104,16 @@ export interface Extras {
   drink?: { productId: string; portion?: string; name: string };
 }
 
-export async function add(pub: number, product: Product, portion: Portion, extras: Extras = {}) {
+/** Adds to the conversation's basket. `table` is the one the menu on screen is for, so a tap always lands at the
+ * pub and table the user can see, even when only the chat had set them. */
+export async function add(pub: number, table: number | null, product: Product, portion: Portion, extras: Extras = {}) {
   const with_ = [portion.name, ...(extras.said ?? [])].join(", ");
   const drink = extras.drink ? ` with ${extras.drink.name}` : "";
   const ok = await change(
     Q.ADD,
     {
       pub,
+      table,
       product: product.id,
       portion: portion.name,
       options: extras.options?.length ? extras.options : null,
