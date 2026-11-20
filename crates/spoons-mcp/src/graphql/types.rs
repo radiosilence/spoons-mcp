@@ -146,25 +146,28 @@ impl Now {
     /// RFC 3339 with the offset: `2026-11-20T18:04:00+00:00`.
     async fn iso(&self) -> String {
         jiff::Timestamp::now()
-            .to_zoned(london())
+            .to_zoned_datetime(london())
             .strftime("%Y-%m-%dT%H:%M:%S%:z")
             .to_string()
     }
     /// `18:04`.
     async fn time(&self) -> String {
         jiff::Timestamp::now()
-            .to_zoned(london())
+            .to_zoned_datetime(london())
             .strftime("%H:%M")
             .to_string()
     }
     /// `2026-11-20`.
     async fn date(&self) -> String {
-        jiff::Timestamp::now().to_zoned(london()).date().to_string()
+        jiff::Timestamp::now()
+            .to_zoned_datetime(london())
+            .date()
+            .to_string()
     }
     /// `Friday`.
     async fn weekday(&self) -> String {
         jiff::Timestamp::now()
-            .to_zoned(london())
+            .to_zoned_datetime(london())
             .strftime("%A")
             .to_string()
     }
@@ -243,7 +246,7 @@ impl Pub {
 /// Today's hours from a venue's `openingTimes`: by date if today has an entry, else by weekday.
 fn today_hours(venue: &spoons_api_client::Venue) -> Option<OpeningHours> {
     let times = venue.opening_times.as_ref()?;
-    let now = jiff::Timestamp::now().to_zoned(london());
+    let now = jiff::Timestamp::now().to_zoned_datetime(london());
     let date = now.date().to_string();
     let day = now.strftime("%a").to_string().to_lowercase();
     let entry = times
@@ -347,7 +350,7 @@ impl Pub {
         ) else {
             return Ok(None);
         };
-        let now = jiff::Timestamp::now().to_zoned(london());
+        let now = jiff::Timestamp::now().to_zoned_datetime(london());
         let now = i32::from(now.hour()) * 60 + i32::from(now.minute());
         // Closing at or after midnight runs into tomorrow; before opening, it may still be last night's session.
         Ok(Some(if closes <= opens {
@@ -1395,7 +1398,7 @@ impl Quote {
     async fn created_at(&self) -> String {
         jiff::Timestamp::from_second(self.order.created_at as i64)
             .map(|t| {
-                t.to_zoned(london())
+                t.to_zoned_datetime(london())
                     .strftime("%Y-%m-%dT%H:%M:%S%:z")
                     .to_string()
             })
