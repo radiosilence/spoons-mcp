@@ -10,7 +10,7 @@ payments go through a second API, `api.jdwpayments.net`, which takes no token.
 ## Install
 
 Each [GitHub release](https://github.com/radiosilence/spoons-mcp/releases) carries the `spoons` binary for Linux
-(static, x86_64 and arm64) and Apple silicon macOS. From a checkout, `cargo install --path crates/spoons-mcp`. The
+(static, x86_64 and arm64) and, added shortly after the release when it has built, Apple silicon macOS. From a checkout, `cargo install --path crates/spoons-mcp`. The
 image `ghcr.io/radiosilence/spoons-mcp` runs the MCP server over HTTP.
 
 ## Dump
