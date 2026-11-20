@@ -81,13 +81,29 @@ impl QueryRoot {
         page(items, after, first, 5, 50, close)
     }
 
-    /// One pub by its ref. Free once the pub list is in.
+    /// One pub by its ref, or without one, the pub this conversation is ordering at ("the pub I'm in"). Free once
+    /// the pub list is in.
     #[graphql(name = "pub")]
     async fn pub_(
         &self,
         ctx: &Context<'_>,
-        #[graphql(name = "ref")] venue_ref: i64,
+        #[graphql(
+            name = "ref",
+            desc = "From `pubs`; the conversation's pub when not given."
+        )]
+        venue_ref: Option<i64>,
     ) -> Result<Option<Pub>> {
+        let venue_ref = match venue_ref {
+            Some(named) => named,
+            None => match ctx.data_unchecked::<Arc<Session>>().basket().pub_ref {
+                Some(here) => here.venue_ref as i64,
+                None => {
+                    return Err(gql(
+                        "no pub in this conversation yet: find it with `pubs` and pass its `ref`",
+                    ));
+                }
+            },
+        };
         let venues = service(ctx).venues().await.map_err(gql)?;
         Ok(venues
             .iter()

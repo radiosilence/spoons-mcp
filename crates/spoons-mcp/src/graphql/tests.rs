@@ -1474,3 +1474,47 @@ async fn the_table_sticks_for_the_conversation() {
         "{elsewhere}"
     );
 }
+
+/// "A markdown menu of the pub I'm in": with no ref or table, the conversation's pub and table.
+#[tokio::test]
+async fn the_menu_as_markdown_for_the_pub_im_in() {
+    let h = harness().await;
+    let nowhere = h
+        .spoons
+        .execute(caller(), "{ pub { name } }", None)
+        .await
+        .unwrap();
+    assert!(
+        nowhere.errors[0]
+            .message
+            .contains("no pub in this conversation"),
+        "{:?}",
+        nowhere.errors
+    );
+    h.run(
+        "mutation { setTable(pub: 254, table: 4) { success } }",
+        json!({}),
+    )
+    .await;
+    let data = h
+        .run("{ pub { name menu { table markdown } } }", json!({}))
+        .await;
+    assert_eq!(data["pub"]["name"], "The Watch House");
+    assert_eq!(data["pub"]["menu"]["table"], 4);
+    let md = data["pub"]["menu"]["markdown"].as_str().unwrap();
+    assert!(md.starts_with("# The Watch House · table 4\n"), "{md}");
+    assert!(md.contains("\n## Cask ales\n"), "{md}");
+    assert!(md.contains("- **Greene King Abbot Ale** 5%"), "{md}");
+    assert!(md.contains("_(guest)_"), "{md}");
+    assert!(md.contains("_(asks: "), "{md}");
+
+    let food = h
+        .run(
+            "{ pub { menu(kinds: [FOOD]) { markdown(byCategory: true) } } }",
+            json!({}),
+        )
+        .await;
+    let food = food["pub"]["menu"]["markdown"].as_str().unwrap();
+    assert!(food.contains("\n## Pub classics\n"), "{food}");
+    assert!(!food.contains("## Cask ales"), "{food}");
+}

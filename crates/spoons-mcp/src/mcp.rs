@@ -68,6 +68,9 @@ moved or names another table, the order is for another pub, or hours have passed
 `createdAt`) so it's plausibly a new visit. People order by voice in a noisy pub: snatches of other conversations \
 (\"I've got a different number\") are noise, not a move, so don't stop to ask about them. A garden or another part \
 of the pub can have its own menu and prices, so read the menu for the table.\n\n\
+For the menu as a document (\"send me the menu\", \"a markdown menu of the pub I'm in\"), \
+`pub { menu { markdown } }`: with no `ref` or `table` it is the conversation's pub and table; `kinds`, `search` \
+and `byCategory` narrow or regroup it. Give it to the user as it comes.\n\n\
 Search forgives what dictation mangles: pass what the user said (\"broccoli barge\", \"sumo\", \"a mocktail\", \
 \"alcohol free lager\") rather than guessing names; results come best first, and `closeMatches` says when none \
 had every word, so say they're the nearest. Page long lists with `first` and `after`.\n\n\
