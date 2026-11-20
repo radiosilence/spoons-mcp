@@ -86,7 +86,7 @@ order, whichever the result is about. Steer it with the tool's optional `ui` arg
 card, `FULL`, or `NONE` for nothing; `focus` a kind such as `CASK_ALE` or a product id; `highlight` product ids). \
 The user can also build the basket and pay there, with the quote's \"Confirm payment\" button; that's a \
 shortcut, not the only way, and a yes in the chat is just as good. What they do there reaches you as context: if \
-they've paid in the app, don't pay that quote again, follow it with `order`. Keep the reply readable \
+they've paid in the app, don't pay that quote again or quote the same round again, follow it with `order`. Keep the reply readable \
 without the app: not every host shows it.";
 
 #[derive(Clone)]

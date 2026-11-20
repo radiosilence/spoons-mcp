@@ -8,6 +8,9 @@ import { Icon, Pouring } from "../ui";
 /** States the payment moves on from by itself. PREPARING isn't one: it has no payment to watch yet, and only stays
  * if a server died mid-request, so polling it would spin. */
 const LIVE: OrderStatus[] = ["PENDING", "IN_PROGRESS", "PAID"];
+/** What a card keeps watching: a quote not yet paid can be paid from another card or the chat at any moment, and a
+ * card left showing "Confirm payment" for a paid quote is a trap. */
+const WATCH: OrderStatus[] = ["NOT_STARTED", ...LIVE];
 
 /** A quote, and once paying starts, its order. Its button is the user's acceptance: it names the total and table,
  * and one tap pays. */
@@ -39,7 +42,8 @@ export function QuoteView({
   }, [quoteId]);
 
   // Follow the payment while it's moving: the server waits up to 20 s for a change, so this is cheap.
-  const started = track || (quote && quote.status !== "NOT_STARTED") || (result?.status && result.status !== "NOT_STARTED");
+  // Every card watches its quote once loaded, so all the cards for one round agree on whether it's paid.
+  const started = track || quote != null || (result?.status && result.status !== "NOT_STARTED");
   useEffect(() => {
     if (!quoteId || !started) return;
     let stop = false;
@@ -47,13 +51,18 @@ export function QuoteView({
       let wait = 0;
       let last: OrderStatus | null = null;
       while (!stop) {
+        // An unpaid quote answers at once, so a card checks every few seconds; not while the chat is in the background.
+        if (document.hidden) {
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
         const asked = Date.now();
         try {
           const { order } = await gql<{ order: Order }>(Q.ORDER, { id: quoteId, wait });
           if (stop) return;
           setOrder(order);
           setQuote(order.quote);
-          if (!LIVE.includes(order.status)) return;
+          if (!WATCH.includes(order.status)) return;
           // The server holds the call until something changes; if it answered at once with nothing new, pause.
           if (order.status === last && Date.now() - asked < 2000) await new Promise((r) => setTimeout(r, 5000));
           last = order.status;
