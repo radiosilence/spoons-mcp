@@ -1,0 +1,1 @@
+- **The menu as Markdown.** `pub { menu { markdown } }` gives the whole menu, or the part `kinds` and `search` pick, as Markdown with sizes, prices, guest ales, options and deals; with no `ref` or `table` it's the conversation's pub and table, so "a markdown menu of the pub I'm in" is one query.
