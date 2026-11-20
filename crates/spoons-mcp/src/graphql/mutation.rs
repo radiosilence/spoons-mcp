@@ -590,10 +590,10 @@ impl MutationRoot {
         }
     }
 
-    /// Pays for a quote: PREVIEW, then CONFIRM with the token on the user's say-so: their yes to the quote, or
-    /// "and pay" given with the order, in which case quote, preview and confirm in one go and still show them the
-    /// lines, table and total. With a saved card CONFIRM enters it and reports how the payment went; otherwise it returns the
-    /// payment page, where the user enters their card. The bank may ask the user to approve in their banking app:
+    /// Pays for a quote. On the user's yes (or "and pay" with the order), PREVIEW and then straight away CONFIRM
+    /// with its token. With a saved card the server enters it on the payment page itself, so the caller never
+    /// handles card details, and reports how the payment went; otherwise it returns the payment page, where the
+    /// user enters their card. The bank may ask the user to approve in their banking app:
     /// follow with `order(quoteId, waitSecs)`. Never starts a second payment for one quote, and never enters the
     /// card twice. `confirmDuplicate` only after the user has said they want a repeat of a recent order.
     #[allow(clippy::too_many_arguments)]
@@ -679,7 +679,7 @@ impl MutationRoot {
                     card: None,
                     question: None,
                     next: Some(
-                        "CONFIRM on the user's say-so: their yes to this, or \"and pay\" given with the order. Either way, show them the lines, table and total.".to_owned(),
+                        "If the user has said yes or asked to pay, CONFIRM now with this token; the server enters the saved card itself.".to_owned(),
                     ),
                     error: None,
                 }
