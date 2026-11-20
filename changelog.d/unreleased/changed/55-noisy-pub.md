@@ -1,0 +1,1 @@
+- **Made for a loud pub.** The server instructions tell Claude that voice messages carry other people's talk and the dictation's guesses: work out the order and ignore the rest, say its reading back with the quote rather than asking a string of questions, keep replies short, and pay only on a yes that plainly answers the quote.
