@@ -1354,3 +1354,39 @@ async fn same_again_keeps_the_options_and_the_drink() {
     assert!(lines[2]["includedWith"].is_string());
     assert_eq!(again["quote"]["success"], true, "{again}");
 }
+
+/// What the app's sheet sends: options by group id and option id, and the drink with no size.
+#[tokio::test]
+async fn the_sheet_adds_by_ids_with_a_drink() {
+    let h = harness().await;
+    let menu = h
+        .run(
+            "query($p: ID!) { pub(ref: 254) { menu(table: 4) { product(id: $p) { \
+               optionGroups { id name options { id label } } includedDrinks(search: \"guinness\") { id } } } } }",
+            json!({ "p": FISH }),
+        )
+        .await;
+    let product = &menu["pub"]["menu"]["product"];
+    let group = &product["optionGroups"][0];
+    let mushy = group["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["label"] == "Mushy Peas")
+        .unwrap_or_else(|| panic!("{group}"))["id"]
+        .clone();
+    let data = h
+        .run(
+            "mutation($p: ID!, $o: [OptionPickInput!], $d: IncludedDrinkInput) { \
+               basketAdd(pub: 254, productId: $p, portion: \"Standard\", options: $o, includeDrink: $d) \
+               { success error basket { lines { name options includedWith } } } }",
+            json!({ "p": FISH,
+                    "o": [{ "group": group["id"], "options": [mushy] }],
+                    "d": { "productId": product["includedDrinks"][0]["id"], "portion": null } }),
+        )
+        .await;
+    assert_eq!(data["basketAdd"]["success"], true, "{data}");
+    let lines = &data["basketAdd"]["basket"]["lines"];
+    assert_eq!(lines[0]["options"], json!(["Mushy Peas"]), "{data}");
+    assert_eq!(lines[1]["name"], "Guinness", "{data}");
+}
